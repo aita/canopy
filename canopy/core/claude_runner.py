@@ -1,10 +1,66 @@
 """Claude Code CLI runner for executing claude commands."""
 
 import json
+from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtCore import QObject, QProcess, Signal
+
+
+@dataclass
+class StreamEvent:
+    """Represents a stream-json event from Claude CLI."""
+
+    type: str  # init, user_input, assistant, tool_use, tool_result, result, error
+    message: dict | None = None
+    tool_name: str | None = None
+    tool_input: dict | None = None
+    tool_result: str | None = None
+    content: str = ""
+    session_id: str | None = None
+    cost_usd: float | None = None
+    duration_ms: int | None = None
+
+    @classmethod
+    def from_json(cls, data: dict) -> "StreamEvent":
+        """Create from JSON data."""
+        event = cls(type=data.get("type", "unknown"))
+        event.session_id = data.get("session_id")
+
+        if event.type == "init":
+            event.session_id = data.get("session_id")
+            event.message = data.get("message")
+        elif event.type in ("assistant", "user_input"):
+            event.message = data.get("message", {})
+            content_blocks = event.message.get("content", [])
+            texts = []
+            for block in content_blocks:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    texts.append(block.get("text", ""))
+                elif isinstance(block, str):
+                    texts.append(block)
+            event.content = "\n".join(texts)
+        elif event.type == "tool_use":
+            event.tool_name = data.get("tool", {}).get("name")
+            event.tool_input = data.get("tool", {}).get("input")
+        elif event.type == "tool_result":
+            event.tool_name = data.get("tool", {}).get("name")
+            event.tool_result = data.get("tool", {}).get("result")
+        elif event.type == "result":
+            event.session_id = data.get("session_id")
+            event.cost_usd = data.get("cost_usd")
+            event.duration_ms = data.get("duration_ms")
+            # Result content
+            result = data.get("result", "")
+            if isinstance(result, str):
+                event.content = result
+            elif isinstance(result, dict):
+                event.content = result.get("text", "")
+        elif event.type == "error":
+            event.content = data.get("error", {}).get("message", str(data))
+
+        return event
 
 
 class ClaudeRunner(QObject):
@@ -18,17 +74,26 @@ class ClaudeRunner(QObject):
     process_finished = Signal(int)  # Exit code
     stream_chunk = Signal(str)  # Streaming text chunk
 
+    # New stream-json signals
+    stream_event = Signal(object)  # StreamEvent object
+    assistant_text = Signal(str)  # Incremental assistant text
+    tool_use_started = Signal(str, dict)  # tool_name, tool_input
+    tool_result_received = Signal(str, str)  # tool_name, result
+
     def __init__(
         self,
         claude_command: str = "claude",
-        parent: Optional[QObject] = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.claude_command = claude_command
-        self._process: Optional[QProcess] = None
-        self._output_buffer = ""
-        self._current_cwd: Optional[Path] = None
-        self._session_id: Optional[str] = None
+        self._process: QProcess | None = None
+        self._output_buffer = StringIO()  # Full output buffer
+        self._line_buffer = StringIO()  # For incomplete JSON lines
+        self._current_cwd: Path | None = None
+        self._session_id: str | None = None
+        self._output_format: str = "json"
+        self._events: list[StreamEvent] = []  # Collected stream events
 
     @property
     def is_running(self) -> bool:
@@ -36,17 +101,22 @@ class ClaudeRunner(QObject):
         return self._process is not None and self._process.state() == QProcess.ProcessState.Running
 
     @property
-    def session_id(self) -> Optional[str]:
+    def session_id(self) -> str | None:
         """Get the current Claude session ID for --resume."""
         return self._session_id
+
+    @property
+    def events(self) -> list[StreamEvent]:
+        """Get the collected stream events."""
+        return self._events.copy()
 
     def send_message(
         self,
         message: str,
         cwd: Path,
-        output_format: str = "json",
-        resume_session: Optional[str] = None,
-        allowed_tools: Optional[list[str]] = None,
+        output_format: str = "stream-json",
+        resume_session: str | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> None:
         """Send a message to Claude Code.
 
@@ -62,7 +132,10 @@ class ClaudeRunner(QObject):
             return
 
         self._current_cwd = cwd
-        self._output_buffer = ""
+        self._output_buffer = StringIO()
+        self._line_buffer = StringIO()
+        self._output_format = output_format
+        self._events = []
 
         # Build command arguments
         # Note: Working directory is set via setWorkingDirectory()
@@ -108,7 +181,7 @@ class ClaudeRunner(QObject):
             return
 
         data = self._process.readAllStandardOutput().data().decode("utf-8")
-        self._output_buffer += data
+        self._output_buffer.write(data)
         self.output_received.emit(data)
 
         # Try to parse streaming JSON chunks
@@ -143,8 +216,14 @@ class ClaudeRunner(QObject):
 
     def _parse_streaming_output(self, data: str) -> None:
         """Parse streaming JSON output."""
-        # Handle JSONL (newline-delimited JSON)
-        for line in data.split("\n"):
+        # Append to line buffer for handling partial lines
+        self._line_buffer.write(data)
+
+        # Get current buffer content and process complete lines
+        buffer_content = self._line_buffer.getvalue()
+
+        while "\n" in buffer_content:
+            line, buffer_content = buffer_content.split("\n", 1)
             line = line.strip()
             if not line:
                 continue
@@ -152,25 +231,45 @@ class ClaudeRunner(QObject):
             try:
                 obj = json.loads(line)
                 self._handle_json_message(obj)
+
+                # Handle stream-json events
+                if self._output_format == "stream-json":
+                    event = StreamEvent.from_json(obj)
+                    self._events.append(event)
+                    self.stream_event.emit(event)
+
+                    # Emit specific signals based on event type
+                    if event.type == "assistant" and event.content:
+                        self.assistant_text.emit(event.content)
+                    elif event.type == "tool_use" and event.tool_name:
+                        self.tool_use_started.emit(event.tool_name, event.tool_input or {})
+                    elif event.type == "tool_result" and event.tool_name:
+                        self.tool_result_received.emit(event.tool_name, event.tool_result or "")
+
             except json.JSONDecodeError:
                 # Not JSON, emit as raw text
                 self.stream_chunk.emit(line)
 
+        # Update buffer with remaining incomplete line
+        self._line_buffer = StringIO()
+        self._line_buffer.write(buffer_content)
+
     def _parse_final_output(self) -> None:
         """Parse the final complete output."""
-        if not self._output_buffer:
+        output_content = self._output_buffer.getvalue()
+        if not output_content:
             return
 
         # Try to parse as a single JSON object
         try:
-            result = json.loads(self._output_buffer)
+            result = json.loads(output_content)
             self._handle_json_message(result)
             return
         except json.JSONDecodeError:
             pass
 
         # Try to parse as JSONL and get the last message
-        lines = self._output_buffer.strip().split("\n")
+        lines = output_content.strip().split("\n")
         for line in reversed(lines):
             line = line.strip()
             if not line:
@@ -242,11 +341,11 @@ class ClaudeResponse:
         return ""
 
     @property
-    def cost_usd(self) -> Optional[float]:
+    def cost_usd(self) -> float | None:
         """Get the cost in USD if available."""
         return self.raw.get("cost_usd")
 
     @property
-    def duration_ms(self) -> Optional[int]:
+    def duration_ms(self) -> int | None:
         """Get the duration in milliseconds if available."""
         return self.raw.get("duration_ms")

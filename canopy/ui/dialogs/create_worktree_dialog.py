@@ -1,7 +1,6 @@
 """Dialog for creating a new worktree."""
 
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -32,7 +31,7 @@ class CreateWorktreeDialog(QDialog):
         self,
         repository: Repository,
         git_service: GitService,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._repository = repository

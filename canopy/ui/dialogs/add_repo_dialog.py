@@ -1,7 +1,6 @@
 """Dialog for adding a Git repository."""
 
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtWidgets import (
     QDialog,
@@ -25,11 +24,11 @@ class AddRepoDialog(QDialog):
     def __init__(
         self,
         git_service: GitService,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._git_service = git_service
-        self._selected_path: Optional[Path] = None
+        self._selected_path: Path | None = None
 
         self._setup_ui()
         self._connect_signals()
@@ -138,6 +137,6 @@ class AddRepoDialog(QDialog):
                 "Please select a valid Git repository.",
             )
 
-    def get_repository_path(self) -> Optional[Path]:
+    def get_repository_path(self) -> Path | None:
         """Get the selected repository path."""
         return self._selected_path

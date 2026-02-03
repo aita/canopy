@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-from typing import Optional
 from uuid import UUID
 
 from PySide6.QtCore import QObject, Signal
@@ -10,7 +9,7 @@ from PySide6.QtCore import QObject, Signal
 from canopy.models.config import get_sessions_dir
 from canopy.models.session import Message, MessageRole, Session, SessionStatus
 
-from .claude_runner import ClaudeResponse, ClaudeRunner
+from .claude_runner import ClaudeResponse, ClaudeRunner, StreamEvent
 
 
 class SessionManager(QObject):
@@ -23,10 +22,16 @@ class SessionManager(QObject):
     message_received = Signal(Session, Message)
     status_changed = Signal(Session, SessionStatus)
 
+    # Stream-json signals
+    stream_event_received = Signal(Session, object)  # StreamEvent
+    streaming_text = Signal(Session, str)  # Incremental text
+    tool_use_started = Signal(Session, str, dict)  # tool_name, input
+    tool_result_received = Signal(Session, str, str)  # tool_name, result
+
     def __init__(
         self,
         claude_command: str = "claude",
-        parent: Optional[QObject] = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._sessions: dict[UUID, Session] = {}
@@ -41,7 +46,7 @@ class SessionManager(QObject):
         """Get all sessions."""
         return list(self._sessions.values())
 
-    def get_session(self, session_id: UUID) -> Optional[Session]:
+    def get_session(self, session_id: UUID) -> Session | None:
         """Get a session by ID."""
         return self._sessions.get(session_id)
 
@@ -55,7 +60,7 @@ class SessionManager(QObject):
     def create_session(
         self,
         worktree_path: Path,
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> Session:
         """Create a new session for a worktree."""
         session = Session(worktree_path=worktree_path)
@@ -97,8 +102,19 @@ class SessionManager(QObject):
         for session in sessions:
             self.remove_session(session.id)
 
-    def send_message(self, session_id: UUID, message: str) -> None:
-        """Send a message to a session."""
+    def send_message(
+        self,
+        session_id: UUID,
+        message: str,
+        file_references: list[str] | None = None,
+    ) -> None:
+        """Send a message to a session.
+
+        Args:
+            session_id: The session ID
+            message: The message to send
+            file_references: Optional list of file references to include
+        """
         session = self._sessions.get(session_id)
         if not session:
             return
@@ -110,6 +126,12 @@ class SessionManager(QObject):
         if runner.is_running:
             return  # Already processing
 
+        # Build message with file references
+        full_message = message
+        if file_references:
+            refs = "\n".join(f"@{ref}" for ref in file_references)
+            full_message = f"{refs}\n\n{message}"
+
         # Add user message to session
         user_msg = session.add_message(MessageRole.USER, message)
         self.message_received.emit(session, user_msg)
@@ -118,11 +140,11 @@ class SessionManager(QObject):
         session.status = SessionStatus.RUNNING
         self.status_changed.emit(session, SessionStatus.RUNNING)
 
-        # Send to Claude
+        # Send to Claude using stream-json format
         runner.send_message(
-            message=message,
+            message=full_message,
             cwd=session.worktree_path,
-            output_format="json",
+            output_format="stream-json",
             resume_session=session.claude_session_id,
         )
 
@@ -150,8 +172,50 @@ class SessionManager(QObject):
             lambda code: self._on_finished(session.id, code)
         )
 
+        # Connect stream-json signals
+        runner.stream_event.connect(
+            lambda event: self._on_stream_event(session.id, event)
+        )
+        runner.assistant_text.connect(
+            lambda text: self._on_assistant_text(session.id, text)
+        )
+        runner.tool_use_started.connect(
+            lambda name, inp: self._on_tool_use(session.id, name, inp)
+        )
+        runner.tool_result_received.connect(
+            lambda name, result: self._on_tool_result(session.id, name, result)
+        )
+
         self._runners[session.id] = runner
         return runner
+
+    def _on_stream_event(self, session_id: UUID, event: StreamEvent) -> None:
+        """Handle a stream event."""
+        session = self._sessions.get(session_id)
+        if session:
+            self.stream_event_received.emit(session, event)
+
+            # Update session ID from init event
+            if event.type == "init" and event.session_id:
+                session.claude_session_id = event.session_id
+
+    def _on_assistant_text(self, session_id: UUID, text: str) -> None:
+        """Handle streaming assistant text."""
+        session = self._sessions.get(session_id)
+        if session:
+            self.streaming_text.emit(session, text)
+
+    def _on_tool_use(self, session_id: UUID, tool_name: str, tool_input: dict) -> None:
+        """Handle tool use event."""
+        session = self._sessions.get(session_id)
+        if session:
+            self.tool_use_started.emit(session, tool_name, tool_input)
+
+    def _on_tool_result(self, session_id: UUID, tool_name: str, result: str) -> None:
+        """Handle tool result event."""
+        session = self._sessions.get(session_id)
+        if session:
+            self.tool_result_received.emit(session, tool_name, result)
 
     def _on_response(self, session_id: UUID, response: dict) -> None:
         """Handle a response from Claude."""
@@ -226,6 +290,6 @@ class SessionManager(QObject):
         except (json.JSONDecodeError, KeyError):
             pass  # Ignore corrupted sessions file
 
-    def get_runner(self, session_id: UUID) -> Optional[ClaudeRunner]:
+    def get_runner(self, session_id: UUID) -> ClaudeRunner | None:
         """Get the runner for a session."""
         return self._runners.get(session_id)

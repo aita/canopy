@@ -166,6 +166,9 @@ class MainWindow(QMainWindow):
         self._session_manager.session_created.connect(self._on_session_created)
         self._session_manager.status_changed.connect(self._on_status_changed)
 
+        # Connect tool result signal to refresh diffs
+        self._session_manager.tool_result_received.connect(self._on_tool_result)
+
     def _restore_geometry(self) -> None:
         """Restore window geometry from config."""
         self.resize(self._config.window_width, self._config.window_height)
@@ -330,9 +333,11 @@ class MainWindow(QMainWindow):
         # Just remove from tabs, don't delete the session
         self._session_tabs.remove_session(session_id)
 
-    def _on_message_submitted(self, session_id: UUID, message: str) -> None:
+    def _on_message_submitted(
+        self, session_id: UUID, message: str, file_refs: list[str] = None
+    ) -> None:
         """Handle message submitted from session tab."""
-        self._session_manager.send_message(session_id, message)
+        self._session_manager.send_message(session_id, message, file_refs or [])
 
     def _on_cancel_requested(self, session_id: UUID) -> None:
         """Handle cancel request from session tab."""
@@ -344,6 +349,37 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage("Processing...")
         else:
             self._statusbar.showMessage("Ready")
+            # Refresh diff view when Claude finishes
+            self._refresh_session_diff(session.id)
+
+    def _on_tool_result(self, session: Session, tool_name: str, result: str) -> None:
+        """Handle tool result - refresh diffs if file was modified."""
+        # Refresh diff view when file operations complete
+        if tool_name in ("Write", "Edit", "Bash"):
+            self._refresh_session_diff(session.id)
+
+    def _refresh_session_diff(self, session_id) -> None:
+        """Refresh the diff view for a session."""
+        tab = self._session_tabs.get_tab(session_id)
+        if not tab:
+            return
+
+        session = self._session_manager.get_session(session_id)
+        if not session:
+            return
+
+        try:
+            # Get changed files
+            staged = tab.diff_viewer.is_staged_view
+            files = self._git_service.get_changed_files(
+                session.worktree_path, staged=staged
+            )
+            tab.diff_viewer.set_files(files)
+
+            # If a file is selected, refresh its diff
+            # This happens automatically when files are set
+        except Exception as e:
+            self._statusbar.showMessage(f"Error refreshing diff: {e}")
 
     def _on_new_session(self) -> None:
         """Handle new session menu action."""

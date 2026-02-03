@@ -1,7 +1,5 @@
 """Message input widget for sending messages to Claude."""
 
-from typing import Optional
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent, QFont
 from PySide6.QtWidgets import (
@@ -34,7 +32,7 @@ class MessageInput(QWidget):
     message_submitted = Signal(str)
     cancel_requested = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._is_processing = False
         self._setup_ui()
