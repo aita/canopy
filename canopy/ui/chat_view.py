@@ -1,7 +1,6 @@
 """Chat view widget for displaying conversation history."""
 
 from io import StringIO
-from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QTextCursor, QPalette, QColor
@@ -26,7 +25,7 @@ class MessageWidget(QFrame):
     def __init__(
         self,
         message: Message,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._message = message
@@ -132,7 +131,7 @@ class MessageWidget(QFrame):
 class ChatView(QWidget):
     """Widget for displaying chat history - VSCode extension style."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._messages: list[Message] = []
         self._setup_ui()
@@ -201,7 +200,7 @@ class ChatView(QWidget):
 class StreamingChatView(QWidget):
     """Chat view with streaming support - VSCode extension style."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._messages: list[Message] = []
         self._streaming_buffer = StringIO()
@@ -326,9 +325,9 @@ class StreamingMessageWidget(QFrame):
 
     def __init__(
         self,
-        message: Optional[Message] = None,
+        message: Message | None = None,
         streaming: bool = False,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._message = message
@@ -477,7 +476,7 @@ class StreamingMessageWidget(QFrame):
 class SimpleChatView(QWidget):
     """Simple text-based chat view - VSCode extension style."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._setup_ui()
 

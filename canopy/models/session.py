@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 from uuid import UUID, uuid4
 
 
@@ -60,7 +59,7 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     messages: list[Message] = field(default_factory=list)
     status: SessionStatus = SessionStatus.IDLE
-    claude_session_id: Optional[str] = None  # For --resume
+    claude_session_id: str | None = None  # For --resume
 
     def __post_init__(self) -> None:
         if not self.name:

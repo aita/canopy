@@ -1,7 +1,6 @@
 """Command log panel for displaying tool executions."""
 
 from datetime import datetime
-from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont
@@ -25,10 +24,10 @@ class ToolExecutionWidget(QFrame):
         self,
         tool_name: str,
         tool_input: dict,
-        result: Optional[str] = None,
+        result: str | None = None,
         status: str = "pending",
-        timestamp: Optional[datetime] = None,
-        parent: Optional[QWidget] = None,
+        timestamp: datetime | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._tool_name = tool_name
@@ -239,7 +238,7 @@ class CommandLogPanel(QWidget):
 
     clear_requested = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._executions: list[ToolExecutionWidget] = []
         self._setup_ui()

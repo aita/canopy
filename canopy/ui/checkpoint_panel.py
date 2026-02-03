@@ -1,8 +1,6 @@
 """Checkpoint panel for saving and restoring worktree states."""
 
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -59,11 +57,11 @@ class CheckpointPanel(QWidget):
     def __init__(
         self,
         git_service: GitService,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._git_service = git_service
-        self._worktree_path: Optional[Path] = None
+        self._worktree_path: Path | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -231,7 +229,7 @@ class CheckpointPanel(QWidget):
             # Silently ignore errors (e.g., not a git repo)
             pass
 
-    def _get_selected_stash(self) -> Optional[str]:
+    def _get_selected_stash(self) -> str | None:
         """Get the selected stash reference."""
         item = self._list.currentItem()
         if isinstance(item, CheckpointItem):

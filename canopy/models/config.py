@@ -3,7 +3,6 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
 def get_config_dir() -> Path:
@@ -40,8 +39,8 @@ class AppConfig:
     # Window geometry
     window_width: int = 1200
     window_height: int = 800
-    window_x: Optional[int] = None
-    window_y: Optional[int] = None
+    window_x: int | None = None
+    window_y: int | None = None
     splitter_sizes: list[int] = field(default_factory=lambda: [250, 950])
 
     # Claude Code settings

@@ -1,7 +1,6 @@
 """Diff viewer widget for VSCode-style diff display."""
 
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QTextDocument
@@ -54,7 +53,7 @@ class DiffHighlighter(QSyntaxHighlighter):
 class DiffTextEdit(QTextEdit):
     """Text edit optimized for diff display."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setReadOnly(True)
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
@@ -119,10 +118,10 @@ class DiffViewer(QWidget):
     stage_requested = Signal(str)  # Request to stage file
     unstage_requested = Signal(str)  # Request to unstage file
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._current_file: Optional[str] = None
-        self._worktree_path: Optional[Path] = None
+        self._current_file: str | None = None
+        self._worktree_path: Path | None = None
         self._files: list[dict] = []
         self._staged: bool = False
         self._setup_ui()
@@ -384,7 +383,7 @@ class DiffViewer(QWidget):
 class InlineDiffViewer(QWidget):
     """Inline diff viewer showing old and new content side by side."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._setup_ui()
 

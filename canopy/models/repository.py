@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -50,21 +49,21 @@ class Repository:
         return self.path.name
 
     @property
-    def main_worktree(self) -> Optional[Worktree]:
+    def main_worktree(self) -> "Worktree | None":
         """Return the main worktree if exists."""
         for wt in self.worktrees:
             if wt.is_main:
                 return wt
         return None
 
-    def get_worktree_by_branch(self, branch: str) -> Optional[Worktree]:
+    def get_worktree_by_branch(self, branch: str) -> "Worktree | None":
         """Find worktree by branch name."""
         for wt in self.worktrees:
             if wt.branch == branch:
                 return wt
         return None
 
-    def get_worktree_by_path(self, path: Path) -> Optional[Worktree]:
+    def get_worktree_by_path(self, path: Path) -> "Worktree | None":
         """Find worktree by path."""
         for wt in self.worktrees:
             if wt.path == path:

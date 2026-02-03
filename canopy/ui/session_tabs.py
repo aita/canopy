@@ -1,7 +1,6 @@
 """Session tab widget for managing multiple sessions."""
 
 from pathlib import Path
-from typing import Optional
 from uuid import UUID
 
 from PySide6.QtCore import Qt, Signal
@@ -35,7 +34,7 @@ class SessionTab(QWidget):
     def __init__(
         self,
         session: Session,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._session = session
@@ -253,7 +252,7 @@ class SessionTabWidget(QTabWidget):
     def __init__(
         self,
         session_manager: SessionManager,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._session_manager = session_manager
@@ -346,7 +345,7 @@ class SessionTabWidget(QTabWidget):
             del self._tabs[session_id]
             tab.deleteLater()
 
-    def get_current_session_id(self) -> Optional[UUID]:
+    def get_current_session_id(self) -> UUID | None:
         """Get the current session ID."""
         tab = self.currentWidget()
         if isinstance(tab, SessionTab):
@@ -407,6 +406,6 @@ class SessionTabWidget(QTabWidget):
         if tab:
             tab.add_tool_result(tool_name, result)
 
-    def get_tab(self, session_id: UUID) -> Optional[SessionTab]:
+    def get_tab(self, session_id: UUID) -> SessionTab | None:
         """Get a session tab by ID."""
         return self._tabs.get(session_id)

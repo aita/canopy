@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
@@ -14,14 +13,14 @@ class StreamEvent:
     """Represents a stream-json event from Claude CLI."""
 
     type: str  # init, user_input, assistant, tool_use, tool_result, result, error
-    message: Optional[dict] = None
-    tool_name: Optional[str] = None
-    tool_input: Optional[dict] = None
-    tool_result: Optional[str] = None
+    message: dict | None = None
+    tool_name: str | None = None
+    tool_input: dict | None = None
+    tool_result: str | None = None
     content: str = ""
-    session_id: Optional[str] = None
-    cost_usd: Optional[float] = None
-    duration_ms: Optional[int] = None
+    session_id: str | None = None
+    cost_usd: float | None = None
+    duration_ms: int | None = None
 
     @classmethod
     def from_json(cls, data: dict) -> "StreamEvent":
@@ -84,15 +83,15 @@ class ClaudeRunner(QObject):
     def __init__(
         self,
         claude_command: str = "claude",
-        parent: Optional[QObject] = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.claude_command = claude_command
-        self._process: Optional[QProcess] = None
+        self._process: QProcess | None = None
         self._output_buffer = StringIO()  # Full output buffer
         self._line_buffer = StringIO()  # For incomplete JSON lines
-        self._current_cwd: Optional[Path] = None
-        self._session_id: Optional[str] = None
+        self._current_cwd: Path | None = None
+        self._session_id: str | None = None
         self._output_format: str = "json"
         self._events: list[StreamEvent] = []  # Collected stream events
 
@@ -102,7 +101,7 @@ class ClaudeRunner(QObject):
         return self._process is not None and self._process.state() == QProcess.ProcessState.Running
 
     @property
-    def session_id(self) -> Optional[str]:
+    def session_id(self) -> str | None:
         """Get the current Claude session ID for --resume."""
         return self._session_id
 
@@ -116,8 +115,8 @@ class ClaudeRunner(QObject):
         message: str,
         cwd: Path,
         output_format: str = "stream-json",
-        resume_session: Optional[str] = None,
-        allowed_tools: Optional[list[str]] = None,
+        resume_session: str | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> None:
         """Send a message to Claude Code.
 
@@ -342,11 +341,11 @@ class ClaudeResponse:
         return ""
 
     @property
-    def cost_usd(self) -> Optional[float]:
+    def cost_usd(self) -> float | None:
         """Get the cost in USD if available."""
         return self.raw.get("cost_usd")
 
     @property
-    def duration_ms(self) -> Optional[int]:
+    def duration_ms(self) -> int | None:
         """Get the duration in milliseconds if available."""
         return self.raw.get("duration_ms")

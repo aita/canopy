@@ -1,8 +1,6 @@
 """File reference panel for selecting files to add to prompts."""
 
-import os
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
@@ -27,8 +25,8 @@ class FileReferenceItem(QListWidgetItem):
     def __init__(
         self,
         file_path: Path,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> None:
         super().__init__()
         self.file_path = file_path
@@ -66,9 +64,9 @@ class FileReferencePanel(QWidget):
 
     files_changed = Signal(list)  # Emits list of file references
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._worktree_path: Optional[Path] = None
+        self._worktree_path: Path | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -213,8 +211,8 @@ class FileReferencePanel(QWidget):
     def add_file(
         self,
         file_path: Path,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> None:
         """Add a file reference."""
         # Check if already added
@@ -297,9 +295,9 @@ class FileTreePanel(QWidget):
     file_selected = Signal(Path)  # Emits path when file is selected
     file_added = Signal(Path)  # Emits path when file is added to references
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._worktree_path: Optional[Path] = None
+        self._worktree_path: Path | None = None
         self._model = QStandardItemModel()
         self._setup_ui()
 

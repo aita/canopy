@@ -1,7 +1,6 @@
 """Worktree panel widget for the sidebar."""
 
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction
@@ -42,7 +41,7 @@ class WorktreePanel(QWidget):
     def __init__(
         self,
         git_service: GitService,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._git_service = git_service
@@ -120,7 +119,7 @@ class WorktreePanel(QWidget):
         self._sessions_by_worktree[worktree_path] = sessions
         self._refresh_tree()
 
-    def get_selected_repository(self) -> Optional[Repository]:
+    def get_selected_repository(self) -> Repository | None:
         """Get the currently selected repository."""
         item = self._tree.currentItem()
         if not item:
@@ -133,7 +132,7 @@ class WorktreePanel(QWidget):
             item = item.parent()
         return None
 
-    def get_selected_worktree(self) -> Optional[Worktree]:
+    def get_selected_worktree(self) -> Worktree | None:
         """Get the currently selected worktree."""
         item = self._tree.currentItem()
         if not item:

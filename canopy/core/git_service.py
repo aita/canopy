@@ -2,7 +2,6 @@
 
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtCore import QObject, Signal
 
@@ -22,11 +21,11 @@ class GitService(QObject):
     worktrees_changed = Signal(Repository)
     error_occurred = Signal(str)
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
 
     def _run_git(
-        self, args: list[str], cwd: Optional[Path] = None, check: bool = True
+        self, args: list[str], cwd: Path | None = None, check: bool = True
     ) -> subprocess.CompletedProcess:
         """Run a git command and return the result."""
         cmd = ["git"] + args
@@ -158,7 +157,7 @@ class GitService(QObject):
         worktree_path: Path,
         branch: str,
         create_branch: bool = False,
-        base_branch: Optional[str] = None,
+        base_branch: str | None = None,
     ) -> Worktree:
         """Create a new worktree.
 
@@ -236,8 +235,8 @@ class GitService(QObject):
             "untracked": [],
         }
 
-        for line in result.stdout.strip().split("\n"):
-            if not line:
+        for line in result.stdout.rstrip("\n").split("\n"):
+            if not line or len(line) < 4:
                 continue
             code = line[:2]
             filename = line[3:]
@@ -264,7 +263,7 @@ class GitService(QObject):
         self,
         worktree_path: Path,
         staged: bool = False,
-        file_path: Optional[str] = None,
+        file_path: str | None = None,
     ) -> str:
         """Get the diff for a worktree.
 
@@ -489,7 +488,7 @@ class GitService(QObject):
     def create_stash(
         self,
         worktree_path: Path,
-        message: Optional[str] = None,
+        message: str | None = None,
         include_untracked: bool = False,
     ) -> str:
         """Create a stash.

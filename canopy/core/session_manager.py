@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-from typing import Optional
 from uuid import UUID
 
 from PySide6.QtCore import QObject, Signal
@@ -32,7 +31,7 @@ class SessionManager(QObject):
     def __init__(
         self,
         claude_command: str = "claude",
-        parent: Optional[QObject] = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._sessions: dict[UUID, Session] = {}
@@ -47,7 +46,7 @@ class SessionManager(QObject):
         """Get all sessions."""
         return list(self._sessions.values())
 
-    def get_session(self, session_id: UUID) -> Optional[Session]:
+    def get_session(self, session_id: UUID) -> Session | None:
         """Get a session by ID."""
         return self._sessions.get(session_id)
 
@@ -61,7 +60,7 @@ class SessionManager(QObject):
     def create_session(
         self,
         worktree_path: Path,
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> Session:
         """Create a new session for a worktree."""
         session = Session(worktree_path=worktree_path)
@@ -107,7 +106,7 @@ class SessionManager(QObject):
         self,
         session_id: UUID,
         message: str,
-        file_references: Optional[list[str]] = None,
+        file_references: list[str] | None = None,
     ) -> None:
         """Send a message to a session.
 
@@ -291,6 +290,6 @@ class SessionManager(QObject):
         except (json.JSONDecodeError, KeyError):
             pass  # Ignore corrupted sessions file
 
-    def get_runner(self, session_id: UUID) -> Optional[ClaudeRunner]:
+    def get_runner(self, session_id: UUID) -> ClaudeRunner | None:
         """Get the runner for a session."""
         return self._runners.get(session_id)
