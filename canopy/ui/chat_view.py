@@ -1,5 +1,6 @@
 """Chat view widget for displaying conversation history."""
 
+from io import StringIO
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -203,7 +204,7 @@ class StreamingChatView(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._messages: list[Message] = []
-        self._streaming_text = ""
+        self._streaming_buffer = StringIO()
         self._is_streaming = False
         self._setup_ui()
 
@@ -250,7 +251,7 @@ class StreamingChatView(QWidget):
     def clear(self) -> None:
         """Clear all messages."""
         self._messages.clear()
-        self._streaming_text = ""
+        self._streaming_buffer = StringIO()
         self._is_streaming = False
 
         # Remove all message widgets
@@ -274,7 +275,7 @@ class StreamingChatView(QWidget):
     def start_streaming(self) -> None:
         """Start streaming mode for assistant response."""
         self._is_streaming = True
-        self._streaming_text = ""
+        self._streaming_buffer = StringIO()
 
         # Create a streaming message widget
         self._streaming_widget = StreamingMessageWidget(streaming=True)
@@ -286,15 +287,15 @@ class StreamingChatView(QWidget):
     def append_streaming_text(self, text: str) -> None:
         """Append text to the streaming message."""
         if self._is_streaming and hasattr(self, "_streaming_widget"):
-            self._streaming_text += text
-            self._streaming_widget.set_content(self._streaming_text)
+            self._streaming_buffer.write(text)
+            self._streaming_widget.set_content(self._streaming_buffer.getvalue())
             self._scroll_to_bottom()
 
     def finish_streaming(self) -> Message:
         """Finish streaming and convert to regular message."""
         self._is_streaming = False
-        content = self._streaming_text
-        self._streaming_text = ""
+        content = self._streaming_buffer.getvalue()
+        self._streaming_buffer = StringIO()
 
         if hasattr(self, "_streaming_widget"):
             self._streaming_widget.finish_streaming()

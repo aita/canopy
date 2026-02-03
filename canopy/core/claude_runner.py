@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from typing import Optional
 
@@ -88,8 +89,8 @@ class ClaudeRunner(QObject):
         super().__init__(parent)
         self.claude_command = claude_command
         self._process: Optional[QProcess] = None
-        self._output_buffer = ""
-        self._line_buffer = ""  # For incomplete JSON lines
+        self._output_buffer = StringIO()  # Full output buffer
+        self._line_buffer = StringIO()  # For incomplete JSON lines
         self._current_cwd: Optional[Path] = None
         self._session_id: Optional[str] = None
         self._output_format: str = "json"
@@ -132,8 +133,8 @@ class ClaudeRunner(QObject):
             return
 
         self._current_cwd = cwd
-        self._output_buffer = ""
-        self._line_buffer = ""
+        self._output_buffer = StringIO()
+        self._line_buffer = StringIO()
         self._output_format = output_format
         self._events = []
 
@@ -181,7 +182,7 @@ class ClaudeRunner(QObject):
             return
 
         data = self._process.readAllStandardOutput().data().decode("utf-8")
-        self._output_buffer += data
+        self._output_buffer.write(data)
         self.output_received.emit(data)
 
         # Try to parse streaming JSON chunks
@@ -217,11 +218,13 @@ class ClaudeRunner(QObject):
     def _parse_streaming_output(self, data: str) -> None:
         """Parse streaming JSON output."""
         # Append to line buffer for handling partial lines
-        self._line_buffer += data
+        self._line_buffer.write(data)
 
-        # Process complete lines
-        while "\n" in self._line_buffer:
-            line, self._line_buffer = self._line_buffer.split("\n", 1)
+        # Get current buffer content and process complete lines
+        buffer_content = self._line_buffer.getvalue()
+
+        while "\n" in buffer_content:
+            line, buffer_content = buffer_content.split("\n", 1)
             line = line.strip()
             if not line:
                 continue
@@ -248,21 +251,26 @@ class ClaudeRunner(QObject):
                 # Not JSON, emit as raw text
                 self.stream_chunk.emit(line)
 
+        # Update buffer with remaining incomplete line
+        self._line_buffer = StringIO()
+        self._line_buffer.write(buffer_content)
+
     def _parse_final_output(self) -> None:
         """Parse the final complete output."""
-        if not self._output_buffer:
+        output_content = self._output_buffer.getvalue()
+        if not output_content:
             return
 
         # Try to parse as a single JSON object
         try:
-            result = json.loads(self._output_buffer)
+            result = json.loads(output_content)
             self._handle_json_message(result)
             return
         except json.JSONDecodeError:
             pass
 
         # Try to parse as JSONL and get the last message
-        lines = self._output_buffer.strip().split("\n")
+        lines = output_content.strip().split("\n")
         for line in reversed(lines):
             line = line.strip()
             if not line:
