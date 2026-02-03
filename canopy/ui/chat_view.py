@@ -38,7 +38,6 @@ class MessageBubble(QFrame):
 
         # Role label
         role_label = QLabel(self._get_role_display())
-        role_label.setStyleSheet("font-weight: bold; font-size: 11px;")
         layout.addWidget(role_label)
 
         # Content
@@ -64,12 +63,8 @@ class MessageBubble(QFrame):
 
         # Timestamp
         time_label = QLabel(self._message.timestamp.strftime("%H:%M"))
-        time_label.setStyleSheet("color: gray; font-size: 10px;")
         time_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(time_label)
-
-        # Style based on role
-        self._apply_style()
 
     def _get_role_display(self) -> str:
         """Get display name for role."""
@@ -79,36 +74,6 @@ class MessageBubble(QFrame):
             return "Claude"
         else:
             return "System"
-
-    def _apply_style(self) -> None:
-        """Apply style based on message role."""
-        # Use border styling instead of background colors for better dark mode compatibility
-        if self._message.role == MessageRole.USER:
-            self.setStyleSheet("""
-                MessageBubble {
-                    border: 1px solid palette(mid);
-                    border-radius: 8px;
-                    margin-left: 40px;
-                }
-            """)
-        elif self._message.role == MessageRole.ASSISTANT:
-            self.setStyleSheet("""
-                MessageBubble {
-                    border: 1px solid palette(mid);
-                    border-radius: 8px;
-                    margin-right: 40px;
-                }
-            """)
-        else:  # System
-            self.setStyleSheet("""
-                MessageBubble {
-                    border: 1px solid palette(mid);
-                    border-radius: 8px;
-                    margin-left: 20px;
-                    margin-right: 20px;
-                }
-            """)
-
 
 class ChatView(QWidget):
     """Widget for displaying chat history."""
@@ -143,10 +108,6 @@ class ChatView(QWidget):
         # Welcome message when empty
         self._welcome_label = QLabel("Start a conversation with Claude")
         self._welcome_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._welcome_label.setStyleSheet("color: gray; padding: 40px;")
-        font = QFont()
-        font.setPointSize(14)
-        self._welcome_label.setFont(font)
 
     def clear(self) -> None:
         """Clear all messages."""
