@@ -46,7 +46,7 @@ class SessionListItem(QFrame):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(4)
+        layout.setSpacing(2)
 
         # Session name (from branch or worktree name)
         self._name_label = QLabel(self._session.name)
@@ -58,18 +58,18 @@ class SessionListItem(QFrame):
         self._name_label.setWordWrap(True)
         layout.addWidget(self._name_label)
 
-        # Bottom row: repo name and timestamp
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(8)
-
-        # Repo/worktree indicator
-        repo_name = self._session.worktree_path.parent.name
-        self._repo_label = QLabel(repo_name)
-        self._repo_label.setStyleSheet("""
+        # Base branch (shown below session name)
+        base_branch_text = self._session.base_branch or ""
+        self._base_branch_label = QLabel(base_branch_text)
+        self._base_branch_label.setStyleSheet("""
             font-size: 11px;
             color: #9ca3af;
         """)
-        bottom_layout.addWidget(self._repo_label)
+        layout.addWidget(self._base_branch_label)
+
+        # Bottom row: timestamp
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(8)
 
         bottom_layout.addStretch()
 

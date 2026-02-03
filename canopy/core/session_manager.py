@@ -62,9 +62,10 @@ class SessionManager(QObject):
         self,
         worktree_path: Path,
         name: str | None = None,
+        base_branch: str | None = None,
     ) -> Session:
         """Create a new session for a worktree."""
-        session = Session(worktree_path=worktree_path)
+        session = Session(worktree_path=worktree_path, base_branch=base_branch)
         if name:
             session.name = name
 

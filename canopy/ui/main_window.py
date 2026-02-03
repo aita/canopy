@@ -277,9 +277,11 @@ class MainWindow(QMainWindow):
             # Create session for the new worktree
             if creation_info:
                 from datetime import datetime
+                base_branch = creation_info[2] if len(creation_info) > 2 else None
                 session = self._session_manager.create_session(
                     worktree_path=worktree_path,
                     name=f"Session {datetime.now().strftime('%H:%M')}",
+                    base_branch=base_branch,
                 )
                 self._session_panel.add_session(session)
                 self._session_tabs.add_session(session)
@@ -344,8 +346,8 @@ class MainWindow(QMainWindow):
                 # Fallback to current branch
                 base_branch = self._git_service.get_current_branch(self._repository.path)
 
-            # Track the pending creation
-            self._pending_creations[worktree_path] = (self._repository.path, branch_name)
+            # Track the pending creation (including base_branch)
+            self._pending_creations[worktree_path] = (self._repository.path, branch_name, base_branch)
 
             # Start async creation
             self._git_service.create_worktree_async(
