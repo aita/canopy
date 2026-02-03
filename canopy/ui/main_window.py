@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -199,7 +200,7 @@ class MainWindow(QMainWindow):
     def _on_add_repository(self) -> None:
         """Handle add repository action."""
         dialog = AddRepoDialog(self._git_service, self)
-        if dialog.exec():
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             path = dialog.get_repository_path()
             if path and path not in self._repositories:
                 try:
@@ -218,7 +219,7 @@ class MainWindow(QMainWindow):
     def _on_create_worktree(self, repo: Repository) -> None:
         """Handle create worktree action."""
         dialog = CreateWorktreeDialog(repo, self._git_service, self)
-        if dialog.exec():
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             config = dialog.get_worktree_config()
             try:
                 worktree = self._git_service.create_worktree(
