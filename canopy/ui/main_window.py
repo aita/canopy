@@ -200,6 +200,9 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"Canopy - {self._repository.name}")
             self._statusbar.showMessage(f"Repository: {self._repository.name}")
 
+            # Load branches for base branch selection
+            self._load_branches()
+
             # Load existing sessions for this repository
             self._load_sessions()
         except GitError as e:
@@ -241,6 +244,18 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         return None
+
+    def _load_branches(self) -> None:
+        """Load branches for base branch selection."""
+        if not self._repository:
+            return
+
+        try:
+            local_branches, _ = self._git_service.list_branches(self._repository.path)
+            current_branch = self._git_service.get_current_branch(self._repository.path)
+            self._session_panel.set_branches(local_branches, current_branch)
+        except GitError:
+            pass
 
     def _on_worktree_creation_started(self, worktree_path: Path) -> None:
         """Handle worktree creation started."""
@@ -320,8 +335,11 @@ class MainWindow(QMainWindow):
                 self._statusbar.showMessage("Worktree is already being created...")
                 return
 
-            # Get the current branch as base
-            current_branch = self._git_service.get_current_branch(self._repository.path)
+            # Get the selected base branch from session panel
+            base_branch = self._session_panel.get_selected_base_branch()
+            if not base_branch:
+                # Fallback to current branch
+                base_branch = self._git_service.get_current_branch(self._repository.path)
 
             # Track the pending creation
             self._pending_creations[worktree_path] = (self._repository.path, branch_name)
@@ -332,7 +350,7 @@ class MainWindow(QMainWindow):
                 worktree_path=worktree_path,
                 branch=branch_name,
                 create_branch=True,
-                base_branch=current_branch,
+                base_branch=base_branch,
             )
 
         except GitError as e:

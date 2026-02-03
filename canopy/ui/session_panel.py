@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -157,11 +158,16 @@ class SessionPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header
+        # Header with branch selection
         header = QWidget()
         header.setStyleSheet("background-color: #252525;")
-        header_layout = QHBoxLayout(header)
+        header_layout = QVBoxLayout(header)
         header_layout.setContentsMargins(12, 12, 12, 12)
+        header_layout.setSpacing(8)
+
+        # Top row: title and settings
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
 
         header_label = QLabel("セッション")
         header_label.setStyleSheet("""
@@ -169,9 +175,9 @@ class SessionPanel(QWidget):
             font-weight: 500;
             color: #9ca3af;
         """)
-        header_layout.addWidget(header_label)
+        top_row.addWidget(header_label)
 
-        header_layout.addStretch()
+        top_row.addStretch()
 
         # Settings button (placeholder for future use)
         settings_btn = QPushButton("⚙")
@@ -187,7 +193,57 @@ class SessionPanel(QWidget):
                 color: #e5e5e5;
             }
         """)
-        header_layout.addWidget(settings_btn)
+        top_row.addWidget(settings_btn)
+
+        header_layout.addLayout(top_row)
+
+        # Branch selection row
+        branch_row = QHBoxLayout()
+        branch_row.setSpacing(8)
+
+        branch_icon = QLabel("⎇")
+        branch_icon.setStyleSheet("""
+            font-size: 14px;
+            color: #9ca3af;
+        """)
+        branch_row.addWidget(branch_icon)
+
+        self._base_branch_combo = QComboBox()
+        self._base_branch_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #2d2d2d;
+                color: #e5e5e5;
+                border: 1px solid #404040;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+                min-width: 120px;
+            }
+            QComboBox:hover {
+                border-color: #505050;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #9ca3af;
+                margin-right: 6px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2d2d2d;
+                color: #e5e5e5;
+                selection-background-color: #404040;
+                border: 1px solid #404040;
+            }
+        """)
+        branch_row.addWidget(self._base_branch_combo)
+        branch_row.addStretch()
+
+        header_layout.addLayout(branch_row)
 
         layout.addWidget(header)
 
@@ -299,3 +355,33 @@ class SessionPanel(QWidget):
     def select_session(self, session: Session) -> None:
         """Programmatically select a session."""
         self._on_session_clicked(session)
+
+    def set_branches(self, branches: list[str], current_branch: str | None = None) -> None:
+        """Set the list of branches for base branch selection.
+
+        Args:
+            branches: List of branch names.
+            current_branch: The current branch (will be marked and selected by default).
+        """
+        self._base_branch_combo.clear()
+
+        for branch in branches:
+            display_text = branch
+            if branch == current_branch:
+                display_text = f"{branch} (current)"
+            self._base_branch_combo.addItem(display_text, branch)
+
+        # Select current branch by default
+        if current_branch:
+            for i in range(self._base_branch_combo.count()):
+                if self._base_branch_combo.itemData(i) == current_branch:
+                    self._base_branch_combo.setCurrentIndex(i)
+                    break
+
+    def get_selected_base_branch(self) -> str | None:
+        """Get the selected base branch.
+
+        Returns:
+            The selected branch name, or None if no branch is selected.
+        """
+        return self._base_branch_combo.currentData()
