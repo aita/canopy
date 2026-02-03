@@ -23,7 +23,7 @@ from canopy.models.config import AppConfig
 from canopy.models.repository import Repository, Worktree
 from canopy.models.session import Session, SessionStatus
 
-from .dialogs import AddRepoDialog, CreateWorktreeDialog
+from .dialogs import AddRepoDialog, CreateWorktreeDialog, DeleteWorktreeDialog
 from .session_tabs import SessionTabWidget
 from .worktree_panel import WorktreePanel
 
@@ -46,6 +46,10 @@ class MainWindow(QMainWindow):
 
         # Repository data
         self._repositories: dict[Path, Repository] = {}
+
+        # Track pending worktree operations (worktree_path -> repo_path)
+        self._pending_creations: dict[Path, tuple[Path, str]] = {}  # path -> (repo_path, branch)
+        self._pending_removals: dict[Path, Path] = {}  # path -> repo_path
 
         self._setup_ui()
         self._setup_menu()
@@ -169,6 +173,20 @@ class MainWindow(QMainWindow):
         # Connect tool result signal to refresh diffs
         self._session_manager.tool_result_received.connect(self._on_tool_result)
 
+        # Git service signals for async operations
+        self._git_service.worktree_creation_started.connect(
+            self._on_worktree_creation_started
+        )
+        self._git_service.worktree_creation_finished.connect(
+            self._on_worktree_creation_finished
+        )
+        self._git_service.worktree_removal_started.connect(
+            self._on_worktree_removal_started
+        )
+        self._git_service.worktree_removal_finished.connect(
+            self._on_worktree_removal_finished
+        )
+
     def _restore_geometry(self) -> None:
         """Restore window geometry from config."""
         self.resize(self._config.window_width, self._config.window_height)
@@ -227,25 +245,55 @@ class MainWindow(QMainWindow):
         dialog = CreateWorktreeDialog(repo, self._git_service, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             config = dialog.get_worktree_config()
-            try:
-                worktree = self._git_service.create_worktree(
-                    repo_path=repo.path,
-                    worktree_path=config["path"],
-                    branch=config["branch"],
-                    create_branch=config["create_branch"],
-                    base_branch=config["base_branch"],
-                )
-                # Refresh repository
-                updated_repo = self._git_service.get_repository(repo.path)
-                self._repositories[repo.path] = updated_repo
-                self._worktree_panel.update_repository(updated_repo)
-                self._statusbar.showMessage(f"Created worktree: {worktree.branch}")
-            except GitError as e:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Failed to create worktree: {e}",
-                )
+            worktree_path = config["path"]
+
+            # Check if already creating this worktree
+            if self._git_service.is_creating_worktree(worktree_path):
+                self._statusbar.showMessage("Worktree is already being created...")
+                return
+
+            # Track the pending creation
+            self._pending_creations[worktree_path] = (repo.path, config["branch"])
+
+            # Start async creation
+            self._git_service.create_worktree_async(
+                repo_path=repo.path,
+                worktree_path=worktree_path,
+                branch=config["branch"],
+                create_branch=config["create_branch"],
+                base_branch=config["base_branch"],
+            )
+
+    def _on_worktree_creation_started(self, worktree_path: Path) -> None:
+        """Handle worktree creation started."""
+        self._statusbar.showMessage(f"Creating worktree: {worktree_path.name}...")
+
+    def _on_worktree_creation_finished(
+        self, worktree_path: Path, success: bool, message: str
+    ) -> None:
+        """Handle worktree creation completion."""
+        creation_info = self._pending_creations.pop(worktree_path, None)
+
+        if success:
+            branch = creation_info[1] if creation_info else worktree_path.name
+            self._statusbar.showMessage(f"Created worktree: {branch}")
+            # Refresh repository
+            if creation_info:
+                repo_path = creation_info[0]
+                if repo_path in self._repositories:
+                    try:
+                        updated_repo = self._git_service.get_repository(repo_path)
+                        self._repositories[repo_path] = updated_repo
+                        self._worktree_panel.update_repository(updated_repo)
+                    except GitError:
+                        pass
+        else:
+            self._statusbar.showMessage(f"Failed to create worktree: {message}")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to create worktree: {message}",
+            )
 
     def _on_unregister_repository(self, repo: Repository) -> None:
         """Handle unregister repository action."""
@@ -272,35 +320,59 @@ class MainWindow(QMainWindow):
 
     def _on_delete_worktree(self, repo: Repository, worktree: Worktree) -> None:
         """Handle delete worktree action."""
-        reply = QMessageBox.question(
-            self,
-            "Delete Worktree",
-            f"Delete the worktree '{worktree.branch}'?\n\n"
-            f"Path: {worktree.path}\n\n"
-            "WARNING: This will delete the worktree directory from disk!",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+        # Check if already being removed
+        if self._git_service.is_removing_worktree(worktree.path):
+            self._statusbar.showMessage("Worktree is already being removed...")
+            return
+
+        # Show deletion mode dialog
+        dialog = DeleteWorktreeDialog(worktree, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        deletion_mode = dialog.get_deletion_mode()
+        delete_directory = deletion_mode == DeleteWorktreeDialog.DELETE_DIRECTORY
+
+        # Remove sessions first
+        self._session_manager.remove_sessions_for_worktree(worktree.path)
+
+        # Track the pending removal
+        self._pending_removals[worktree.path] = repo.path
+
+        # Start async removal
+        self._git_service.remove_worktree_async(
+            repo_path=repo.path,
+            worktree_path=worktree.path,
+            delete_directory=delete_directory,
         )
 
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                # Remove sessions first
-                self._session_manager.remove_sessions_for_worktree(worktree.path)
+    def _on_worktree_removal_started(self, worktree_path: Path) -> None:
+        """Handle worktree removal started."""
+        self._statusbar.showMessage(f"Removing worktree: {worktree_path.name}...")
 
-                # Remove worktree
-                self._git_service.remove_worktree(repo.path, worktree.path)
+    def _on_worktree_removal_finished(
+        self, worktree_path: Path, success: bool, message: str
+    ) -> None:
+        """Handle worktree removal completion."""
+        repo_path = self._pending_removals.pop(worktree_path, None)
 
-                # Refresh repository
-                updated_repo = self._git_service.get_repository(repo.path)
-                self._repositories[repo.path] = updated_repo
-                self._worktree_panel.update_repository(updated_repo)
-                self._statusbar.showMessage(f"Deleted worktree: {worktree.branch}")
-            except GitError as e:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Failed to delete worktree: {e}",
-                )
+        if success:
+            self._statusbar.showMessage(f"Deleted worktree: {worktree_path.name}")
+            # Refresh repository
+            if repo_path and repo_path in self._repositories:
+                try:
+                    updated_repo = self._git_service.get_repository(repo_path)
+                    self._repositories[repo_path] = updated_repo
+                    self._worktree_panel.update_repository(updated_repo)
+                except GitError:
+                    pass
+        else:
+            self._statusbar.showMessage(f"Failed to delete worktree: {message}")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to delete worktree: {message}",
+            )
 
     def _on_create_session(self, worktree: Worktree) -> None:
         """Handle create session action."""
