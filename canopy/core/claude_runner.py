@@ -65,8 +65,8 @@ class ClaudeRunner(QObject):
         self._output_buffer = ""
 
         # Build command arguments
+        # Note: Working directory is set via setWorkingDirectory()
         args = [
-            "--cwd", str(cwd),
             "--output-format", output_format,
             "--print", message,
         ]

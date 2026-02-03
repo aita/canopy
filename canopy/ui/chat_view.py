@@ -82,10 +82,11 @@ class MessageBubble(QFrame):
 
     def _apply_style(self) -> None:
         """Apply style based on message role."""
+        # Use border styling instead of background colors for better dark mode compatibility
         if self._message.role == MessageRole.USER:
             self.setStyleSheet("""
                 MessageBubble {
-                    background-color: #e3f2fd;
+                    border: 1px solid palette(mid);
                     border-radius: 8px;
                     margin-left: 40px;
                 }
@@ -93,7 +94,7 @@ class MessageBubble(QFrame):
         elif self._message.role == MessageRole.ASSISTANT:
             self.setStyleSheet("""
                 MessageBubble {
-                    background-color: #f5f5f5;
+                    border: 1px solid palette(mid);
                     border-radius: 8px;
                     margin-right: 40px;
                 }
@@ -101,7 +102,7 @@ class MessageBubble(QFrame):
         else:  # System
             self.setStyleSheet("""
                 MessageBubble {
-                    background-color: #fff3e0;
+                    border: 1px solid palette(mid);
                     border-radius: 8px;
                     margin-left: 20px;
                     margin-right: 20px;
@@ -216,26 +217,16 @@ class SimpleChatView(QWidget):
         cursor = self._text.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        # Format based on role
+        # Format based on role - use plain text for better dark mode compatibility
         if message.role == MessageRole.USER:
-            cursor.insertHtml(
-                f'<p style="color: #1976d2;"><b>You</b> '
-                f'<span style="color: gray; font-size: 10px;">'
-                f'{message.timestamp.strftime("%H:%M")}</span></p>'
-            )
+            header = f"[You] {message.timestamp.strftime('%H:%M')}"
         elif message.role == MessageRole.ASSISTANT:
-            cursor.insertHtml(
-                f'<p style="color: #388e3c;"><b>Claude</b> '
-                f'<span style="color: gray; font-size: 10px;">'
-                f'{message.timestamp.strftime("%H:%M")}</span></p>'
-            )
+            header = f"[Claude] {message.timestamp.strftime('%H:%M')}"
         else:
-            cursor.insertHtml(
-                f'<p style="color: #f57c00;"><b>System</b></p>'
-            )
+            header = "[System]"
 
-        # Add content
-        cursor.insertText(message.content + "\n\n")
+        # Add header and content as plain text
+        cursor.insertText(f"{header}\n{message.content}\n\n")
 
         # Scroll to bottom
         self._text.moveCursor(QTextCursor.MoveOperation.End)
