@@ -1,11 +1,16 @@
 """Claude Code CLI runner for executing claude commands."""
 
 import json
+import logging
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QProcess, Signal
+
+from .utils import safe_slot
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -193,6 +198,7 @@ class ClaudeRunner(QObject):
         # Note: We do NOT close stdin to allow responding to permission requests
         self.process_started.emit()
 
+    @safe_slot
     def _on_stdout(self) -> None:
         """Handle stdout data."""
         if not self._process:
@@ -205,6 +211,7 @@ class ClaudeRunner(QObject):
         # Try to parse streaming JSON chunks
         self._parse_streaming_output(data)
 
+    @safe_slot
     def _on_stderr(self) -> None:
         """Handle stderr data."""
         if not self._process:
@@ -214,6 +221,7 @@ class ClaudeRunner(QObject):
         # Buffer stderr instead of emitting immediately to avoid premature status reset
         self._stderr_buffer.write(data)
 
+    @safe_slot
     def _on_finished(self, exit_code: int, exit_status: QProcess.ExitStatus) -> None:
         """Handle process completion."""
         # Skip final output parsing for stream-json format since all events
@@ -229,6 +237,7 @@ class ClaudeRunner(QObject):
         self.process_finished.emit(exit_code)
         self._process = None
 
+    @safe_slot
     def _on_error(self, error: QProcess.ProcessError) -> None:
         """Handle process errors."""
         error_messages = {

@@ -1,11 +1,16 @@
 """Git service for worktree and branch operations."""
 
+import logging
 import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
 
 from canopy.models.repository import Repository, Worktree
+
+from .utils import safe_slot
+
+logger = logging.getLogger(__name__)
 
 
 class GitError(Exception):
@@ -382,6 +387,7 @@ class GitService(QObject):
         self.worktree_creation_started.emit(worktree_path)
         worker.start()
 
+    @safe_slot
     def _on_creation_finished(
         self, worktree_path: Path, success: bool, message: str
     ) -> None:
@@ -393,6 +399,7 @@ class GitService(QObject):
 
         self.worktree_creation_finished.emit(worktree_path, success, message)
 
+    @safe_slot
     def _on_creation_progress(self, worktree_path: Path, message: str) -> None:
         """Handle worktree creation progress."""
         # Could emit a progress signal here if needed
@@ -461,6 +468,7 @@ class GitService(QObject):
         self.worktree_removal_started.emit(worktree_path)
         worker.start()
 
+    @safe_slot
     def _on_removal_finished(
         self, worktree_path: Path, success: bool, message: str
     ) -> None:
@@ -472,6 +480,7 @@ class GitService(QObject):
 
         self.worktree_removal_finished.emit(worktree_path, success, message)
 
+    @safe_slot
     def _on_removal_progress(self, worktree_path: Path, message: str) -> None:
         """Handle worktree removal progress."""
         # Could emit a progress signal here if needed

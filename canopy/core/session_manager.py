@@ -1,6 +1,7 @@
 """Session manager for Claude Code sessions."""
 
 import json
+import logging
 from pathlib import Path
 from uuid import UUID
 
@@ -10,6 +11,9 @@ from canopy.models.config import get_sessions_dir
 from canopy.models.session import Message, MessageRole, Session, SessionStatus
 
 from .claude_runner import ClaudeResponse, ClaudeRunner, StreamEvent
+from .utils import safe_slot
+
+logger = logging.getLogger(__name__)
 
 
 class SessionManager(QObject):
@@ -197,6 +201,7 @@ class SessionManager(QObject):
         self._runners[session.id] = runner
         return runner
 
+    @safe_slot
     def _on_stream_event(self, session_id: UUID, event: StreamEvent) -> None:
         """Handle a stream event."""
         session = self._sessions.get(session_id)
@@ -207,24 +212,28 @@ class SessionManager(QObject):
             if event.type == "init" and event.session_id:
                 session.claude_session_id = event.session_id
 
+    @safe_slot
     def _on_assistant_text(self, session_id: UUID, text: str) -> None:
         """Handle streaming assistant text."""
         session = self._sessions.get(session_id)
         if session:
             self.streaming_text.emit(session, text)
 
+    @safe_slot
     def _on_tool_use(self, session_id: UUID, tool_name: str, tool_input: dict) -> None:
         """Handle tool use event."""
         session = self._sessions.get(session_id)
         if session:
             self.tool_use_started.emit(session, tool_name, tool_input)
 
+    @safe_slot
     def _on_tool_result(self, session_id: UUID, tool_name: str, result: str) -> None:
         """Handle tool result event."""
         session = self._sessions.get(session_id)
         if session:
             self.tool_result_received.emit(session, tool_name, result)
 
+    @safe_slot
     def _on_permission_request(
         self, session_id: UUID, request_id: str, tool_name: str, tool_input: dict
     ) -> None:
@@ -244,6 +253,7 @@ class SessionManager(QObject):
         if runner:
             runner.respond_permission(accept)
 
+    @safe_slot
     def _on_response(self, session_id: UUID, response: dict) -> None:
         """Handle a response from Claude."""
         session = self._sessions.get(session_id)
@@ -269,6 +279,7 @@ class SessionManager(QObject):
 
         self.session_updated.emit(session)
 
+    @safe_slot
     def _on_error(self, session_id: UUID, error: str) -> None:
         """Handle an error from Claude."""
         session = self._sessions.get(session_id)
@@ -285,6 +296,7 @@ class SessionManager(QObject):
             self.status_changed.emit(session, SessionStatus.IDLE)
             self._save_sessions()
 
+    @safe_slot
     def _on_finished(self, session_id: UUID, exit_code: int) -> None:
         """Handle process completion."""
         session = self._sessions.get(session_id)
