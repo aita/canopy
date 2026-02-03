@@ -229,13 +229,17 @@ class SessionManager(QObject):
         if parsed.session_id:
             session.claude_session_id = parsed.session_id
 
-        # Extract and add assistant message
-        content = parsed.content
-        if content:
-            msg = session.add_message(MessageRole.ASSISTANT, content)
-            self.message_received.emit(session, msg)
+        # Only add assistant message for "result" type events to avoid duplicates.
+        # Both "assistant" and "result" events contain the same content,
+        # so we only process the final "result" event.
+        if parsed.is_result:
+            content = parsed.content
+            if content:
+                msg = session.add_message(MessageRole.ASSISTANT, content)
+                self.message_received.emit(session, msg)
 
-        self._save_sessions()
+            self._save_sessions()
+
         self.session_updated.emit(session)
 
     def _on_error(self, session_id: UUID, error: str) -> None:
