@@ -146,6 +146,10 @@ class ClaudeRunner(QObject):
             "--print", message,
         ]
 
+        # stream-json with --print requires --verbose
+        if output_format == "stream-json":
+            args.append("--verbose")
+
         if resume_session:
             args.extend(["--resume", resume_session])
 
