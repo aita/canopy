@@ -218,6 +218,8 @@ class StreamingChatView(QWidget):
         self._current_permission_id: str | None = None
         self._thinking_timer: QTimer | None = None
         self._streaming_widget: StreamingMessageWidget | None = None
+        # Store pending permission request to show after streaming finishes
+        self._pending_permission: dict | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -279,7 +281,9 @@ class StreamingChatView(QWidget):
         self._messages.clear()
         self._streaming_buffer = StringIO()
         self._is_streaming = False
+        self._pending_permission = None
         self._hide_thinking_indicator()
+        self._remove_permission_widget()
 
         # Remove all message widgets (keep stretch and thinking indicator)
         while self._container_layout.count() > 2:
@@ -391,30 +395,50 @@ class StreamingChatView(QWidget):
     def show_permission_request(
         self, request_id: str, tool_name: str, tool_input: dict
     ) -> None:
-        """Show permission request with accept/reject buttons."""
+        """Store permission request to show after streaming finishes."""
+        # Store the request to show after streaming completes
+        self._pending_permission = {
+            "request_id": request_id,
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+        }
+
+        # Update thinking indicator to show permission is pending
+        self._thinking_indicator.setText("⚠️ Permission required...")
+        self._thinking_indicator.setVisible(True)
+
+    def _show_permission_buttons(self) -> None:
+        """Actually show the permission request UI with buttons."""
+        if not self._pending_permission:
+            return
+
+        request_id = self._pending_permission["request_id"]
+        tool_name = self._pending_permission["tool_name"]
+        tool_input = self._pending_permission["tool_input"]
+
         # Remove existing permission widget if any
         self._remove_permission_widget()
         self._current_permission_id = request_id
 
-        # Format tool description
+        # Format tool description and command display
         if tool_name == "Bash":
             cmd = tool_input.get("command", "")
             desc = tool_input.get("description", "")
             if desc:
-                tool_desc = f"`{cmd}` ({desc})"
+                tool_desc = f"{desc}"
+                cmd_display = cmd
             else:
-                tool_desc = f"`{cmd}`"
+                tool_desc = "Bash command"
+                cmd_display = cmd
         elif tool_name in ("Read", "Write", "Edit"):
             path = tool_input.get("file_path", "")
-            tool_desc = f"{tool_name}: {path}"
+            tool_desc = f"{tool_name} file"
+            cmd_display = path
         else:
-            tool_desc = f"{tool_name}"
+            tool_desc = tool_name
+            cmd_display = str(tool_input)
 
-        # Update thinking indicator to show permission request
-        self._thinking_indicator.setText(f"⚠️ Permission required: {tool_desc}")
-        self._thinking_indicator.setVisible(True)
-
-        # Create permission widget with buttons
+        # Create permission widget with command display and buttons
         self._permission_widget = QFrame()
         self._permission_widget.setStyleSheet("""
             QFrame {
@@ -427,8 +451,35 @@ class StreamingChatView(QWidget):
         """)
 
         perm_layout = QVBoxLayout(self._permission_widget)
-        perm_layout.setContentsMargins(0, 0, 0, 0)
-        perm_layout.setSpacing(8)
+        perm_layout.setContentsMargins(12, 12, 12, 12)
+        perm_layout.setSpacing(12)
+
+        # Title
+        title_label = QLabel(f"⚠️ Permission required: {tool_desc}")
+        title_label.setStyleSheet("""
+            QLabel {
+                color: #d97706;
+                font-size: 13px;
+                font-weight: bold;
+            }
+        """)
+        perm_layout.addWidget(title_label)
+
+        # Command display
+        cmd_label = QLabel(cmd_display)
+        cmd_label.setStyleSheet("""
+            QLabel {
+                color: #e5e5e5;
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 12px;
+                background-color: #1a1a1a;
+                padding: 8px 12px;
+                border-radius: 4px;
+            }
+        """)
+        cmd_label.setWordWrap(True)
+        cmd_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        perm_layout.addWidget(cmd_label)
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -473,9 +524,12 @@ class StreamingChatView(QWidget):
 
         perm_layout.addLayout(btn_layout)
 
-        # Insert before stretch
+        # Clear pending permission
+        self._pending_permission = None
+
+        # Insert before thinking indicator (at count - 2)
         self._container_layout.insertWidget(
-            self._container_layout.count() - 1, self._permission_widget
+            self._container_layout.count() - 2, self._permission_widget
         )
         self._scroll_to_bottom()
 
@@ -508,6 +562,10 @@ class StreamingChatView(QWidget):
 
         if hasattr(self, "_streaming_widget") and self._streaming_widget:
             self._streaming_widget.finish_streaming()
+
+        # Show permission buttons if there's a pending request
+        if self._pending_permission:
+            self._show_permission_buttons()
 
         # Create message from streamed content
         msg = Message(role=MessageRole.ASSISTANT, content=content)
