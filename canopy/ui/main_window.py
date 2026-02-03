@@ -300,15 +300,16 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            # Generate a unique branch name for this session
+            # Generate a unique session name and branch
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            branch_name = f"canopy/session-{timestamp}"
+            session_name = f"session-{timestamp}"
+            branch_name = f"canopy/{session_name}"
 
-            # Create a new worktree for this session
-            worktree_path = self._git_service.get_default_worktree_path(
-                self._repository.path, branch_name
-            )
+            # Create worktree in {repo_path}.canopy directory (sibling to repo)
+            canopy_dir = Path(str(self._repository.path) + ".canopy")
+            canopy_dir.mkdir(exist_ok=True)
+            worktree_path = canopy_dir / session_name
 
             # Check if already creating this worktree
             if self._git_service.is_creating_worktree(worktree_path):
