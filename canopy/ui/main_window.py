@@ -140,11 +140,14 @@ class MainWindow(QMainWindow):
         """Connect signals to slots."""
         # Worktree panel signals
         self._worktree_panel.add_repository_requested.connect(self._on_add_repository)
+        self._worktree_panel.unregister_repository_requested.connect(
+            self._on_unregister_repository
+        )
         self._worktree_panel.create_worktree_requested.connect(
             self._on_create_worktree
         )
-        self._worktree_panel.remove_worktree_requested.connect(
-            self._on_remove_worktree
+        self._worktree_panel.delete_worktree_requested.connect(
+            self._on_delete_worktree
         )
         self._worktree_panel.create_session_requested.connect(
             self._on_create_session
@@ -241,14 +244,37 @@ class MainWindow(QMainWindow):
                     f"Failed to create worktree: {e}",
                 )
 
-    def _on_remove_worktree(self, repo: Repository, worktree: Worktree) -> None:
-        """Handle remove worktree action."""
+    def _on_unregister_repository(self, repo: Repository) -> None:
+        """Handle unregister repository action."""
         reply = QMessageBox.question(
             self,
-            "Remove Worktree",
-            f"Are you sure you want to remove the worktree '{worktree.branch}'?\n\n"
+            "Unregister Repository",
+            f"Unregister '{repo.name}' from Canopy?\n\n"
+            "The repository will not be deleted from disk.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Remove sessions for all worktrees
+            for worktree in repo.worktrees:
+                self._session_manager.remove_sessions_for_worktree(worktree.path)
+
+            # Remove from tracking
+            if repo.path in self._repositories:
+                del self._repositories[repo.path]
+            self._config.remove_repository(str(repo.path))
+            self._worktree_panel.remove_repository(repo)
+            self._statusbar.showMessage(f"Unregistered repository: {repo.name}")
+
+    def _on_delete_worktree(self, repo: Repository, worktree: Worktree) -> None:
+        """Handle delete worktree action."""
+        reply = QMessageBox.question(
+            self,
+            "Delete Worktree",
+            f"Delete the worktree '{worktree.branch}'?\n\n"
             f"Path: {worktree.path}\n\n"
-            "This will also remove all sessions for this worktree.",
+            "WARNING: This will delete the worktree directory from disk!",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -265,12 +291,12 @@ class MainWindow(QMainWindow):
                 updated_repo = self._git_service.get_repository(repo.path)
                 self._repositories[repo.path] = updated_repo
                 self._worktree_panel.update_repository(updated_repo)
-                self._statusbar.showMessage(f"Removed worktree: {worktree.branch}")
+                self._statusbar.showMessage(f"Deleted worktree: {worktree.branch}")
             except GitError as e:
                 QMessageBox.critical(
                     self,
                     "Error",
-                    f"Failed to remove worktree: {e}",
+                    f"Failed to delete worktree: {e}",
                 )
 
     def _on_create_session(self, worktree: Worktree) -> None:

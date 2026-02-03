@@ -28,8 +28,9 @@ class WorktreePanel(QWidget):
     worktree_selected = Signal(Worktree)
     session_selected = Signal(Session)
     add_repository_requested = Signal()
+    unregister_repository_requested = Signal(Repository)
     create_worktree_requested = Signal(Repository)
-    remove_worktree_requested = Signal(Repository, Worktree)
+    delete_worktree_requested = Signal(Repository, Worktree)
     create_session_requested = Signal(Worktree)
     remove_session_requested = Signal(Session)
 
@@ -227,9 +228,11 @@ class WorktreePanel(QWidget):
 
             menu.addSeparator()
 
-            remove_action = QAction("Remove Repository", self)
-            remove_action.triggered.connect(lambda: self.remove_repository(repo))
-            menu.addAction(remove_action)
+            unregister_action = QAction("Unregister Repository", self)
+            unregister_action.triggered.connect(
+                lambda: self.unregister_repository_requested.emit(repo)
+            )
+            menu.addAction(unregister_action)
 
         elif item.type() == self.WORKTREE_TYPE:
             worktree = item.data(0, Qt.ItemDataRole.UserRole)
@@ -243,11 +246,11 @@ class WorktreePanel(QWidget):
 
             if not worktree.is_main and repo:
                 menu.addSeparator()
-                remove_action = QAction("Remove Worktree", self)
-                remove_action.triggered.connect(
-                    lambda: self.remove_worktree_requested.emit(repo, worktree)
+                delete_action = QAction("Delete Worktree", self)
+                delete_action.triggered.connect(
+                    lambda: self.delete_worktree_requested.emit(repo, worktree)
                 )
-                menu.addAction(remove_action)
+                menu.addAction(delete_action)
 
         elif item.type() == self.SESSION_TYPE:
             session = item.data(0, Qt.ItemDataRole.UserRole)
