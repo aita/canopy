@@ -278,27 +278,45 @@ class StreamingChatView(QWidget):
         """Start streaming mode for assistant response."""
         self._is_streaming = True
         self._streaming_buffer = StringIO()
+        self._thinking_index = 0
 
-        # Create a streaming message widget
+        # Create a streaming message widget with initial thinking indicator
         self._streaming_widget = StreamingMessageWidget(streaming=True)
+        # Show initial thinking indicator in buffer
+        thinking = self.THINKING_WORDS[0]
+        self._streaming_buffer.write(thinking)
+        self._streaming_widget.set_content(thinking)
+
         self._container_layout.insertWidget(
             self._container_layout.count() - 1, self._streaming_widget
         )
         self._scroll_to_bottom()
 
+    def _clear_thinking_indicator(self) -> None:
+        """Clear the initial thinking indicator from buffer."""
+        current = self._streaming_buffer.getvalue()
+        # Remove initial thinking word if it's the only content
+        for word in self.THINKING_WORDS:
+            if current == word:
+                self._streaming_buffer = StringIO()
+                return
+
     def append_streaming_text(self, text: str) -> None:
         """Append text to the streaming message."""
         if self._is_streaming and hasattr(self, "_streaming_widget"):
+            self._clear_thinking_indicator()
             self._streaming_buffer.write(text)
             self._streaming_widget.set_content(self._streaming_buffer.getvalue())
             self._scroll_to_bottom()
 
     def show_tool_use(self, tool_name: str, tool_input: dict) -> None:
-        """Show tool use with thinking indicator."""
+        """Show tool use info."""
         if self._is_streaming and hasattr(self, "_streaming_widget"):
-            # Get a thinking word (cycle through them)
-            thinking = self.THINKING_WORDS[self._thinking_index % len(self.THINKING_WORDS)]
+            self._clear_thinking_indicator()
+
+            # Get next thinking word
             self._thinking_index += 1
+            thinking = self.THINKING_WORDS[self._thinking_index % len(self.THINKING_WORDS)]
 
             # Format tool info
             if tool_name == "Bash":
@@ -321,7 +339,7 @@ class StreamingChatView(QWidget):
             current = self._streaming_buffer.getvalue()
             if current and not current.endswith("\n"):
                 self._streaming_buffer.write("\n")
-            self._streaming_buffer.write(tool_info + "\n")
+            self._streaming_buffer.write(tool_info)
             self._streaming_widget.set_content(self._streaming_buffer.getvalue())
             self._scroll_to_bottom()
 
@@ -335,7 +353,7 @@ class StreamingChatView(QWidget):
                     preview = "\n".join(lines[:5]) + f"\n... ({len(lines)} lines)"
                 else:
                     preview = result
-                self._streaming_buffer.write(f"```\n{preview}\n```\n")
+                self._streaming_buffer.write(f"\n```\n{preview}\n```")
                 self._streaming_widget.set_content(self._streaming_buffer.getvalue())
                 self._scroll_to_bottom()
 
