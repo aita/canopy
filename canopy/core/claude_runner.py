@@ -66,8 +66,10 @@ class ClaudeRunner(QObject):
 
         # Build command arguments
         # Note: Working directory is set via setWorkingDirectory()
+        # Use --permission-mode default to avoid interactive prompts
         args = [
             "--output-format", output_format,
+            "--permission-mode", "default",
             "--print", message,
         ]
 
@@ -96,6 +98,8 @@ class ClaudeRunner(QObject):
         self._process.errorOccurred.connect(self._on_error)
 
         self._process.start()
+        # Close stdin to prevent interactive prompts from blocking
+        self._process.closeWriteChannel()
         self.process_started.emit()
 
     def _on_stdout(self) -> None:

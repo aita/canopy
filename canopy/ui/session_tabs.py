@@ -43,11 +43,14 @@ class SessionTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Session info header
+        # Session info header - VSCode extension style
         header = QWidget()
-        header.setStyleSheet("background-color: #f5f5f5; border-bottom: 1px solid #ddd;")
+        header.setStyleSheet("""
+            background-color: palette(window);
+            border-bottom: 1px solid #3a3a3a;
+        """)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 8, 12, 8)
+        header_layout.setContentsMargins(12, 10, 12, 10)
 
         self._branch_label = QLabel()
         self._update_header()
@@ -84,20 +87,36 @@ class SessionTab(QWidget):
     def _update_header(self) -> None:
         """Update the header info."""
         branch = self._session.worktree_path.name
-        self._branch_label.setText(f"📁 {branch}")
+        self._branch_label.setText(branch)
+        self._branch_label.setStyleSheet("""
+            font-size: 12px;
+            font-weight: 500;
+        """)
         self._branch_label.setToolTip(str(self._session.worktree_path))
 
     def _update_status(self) -> None:
         """Update the status display."""
         if self._session.status == SessionStatus.RUNNING:
-            self._status_label.setText("⏳ Processing...")
-            self._status_label.setStyleSheet("color: #1976d2;")
+            self._status_label.setText("Processing...")
+            self._status_label.setStyleSheet("""
+                color: #d97706;
+                font-size: 11px;
+                font-weight: 500;
+            """)
         elif self._session.status == SessionStatus.IDLE:
-            self._status_label.setText("✓ Ready")
-            self._status_label.setStyleSheet("color: #388e3c;")
+            self._status_label.setText("Ready")
+            self._status_label.setStyleSheet("""
+                color: #22c55e;
+                font-size: 11px;
+                font-weight: 500;
+            """)
         else:
-            self._status_label.setText("⏹ Terminated")
-            self._status_label.setStyleSheet("color: #757575;")
+            self._status_label.setText("Stopped")
+            self._status_label.setStyleSheet("""
+                color: #6b7280;
+                font-size: 11px;
+                font-weight: 500;
+            """)
 
     @property
     def session(self) -> Session:
@@ -146,12 +165,12 @@ class SessionTabWidget(QTabWidget):
 
         # Placeholder when no tabs
         self._placeholder = QLabel("Select a worktree and create a session to start")
-        self._placeholder.setStyleSheet(
-            "color: gray; padding: 40px; font-size: 14px;"
-        )
-        self._placeholder.setAlignment(
-            Qt.AlignmentFlag.AlignCenter
-        ) if hasattr(self, 'Qt') else None
+        self._placeholder.setStyleSheet("""
+            color: #6b7280;
+            padding: 40px;
+            font-size: 13px;
+        """)
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def _connect_signals(self) -> None:
         """Connect signals."""
