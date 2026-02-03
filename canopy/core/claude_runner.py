@@ -5,7 +5,10 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 
+import logbook
 from PySide6.QtCore import QObject, QProcess, Signal
+
+log = logbook.Logger(__name__)
 
 
 @dataclass
@@ -189,6 +192,8 @@ class ClaudeRunner(QObject):
         self._process.finished.connect(self._on_finished)
         self._process.errorOccurred.connect(self._on_error)
 
+        log.debug("Starting Claude CLI: {} {}", self.claude_command, " ".join(args))
+        log.debug("Working directory: {}", self._current_cwd)
         self._process.start()
         # Note: We do NOT close stdin to allow responding to permission requests
         self.process_started.emit()
@@ -199,6 +204,7 @@ class ClaudeRunner(QObject):
             return
 
         data = self._process.readAllStandardOutput().data().decode("utf-8")
+        log.debug("Claude CLI stdout: {}", data)
         self._output_buffer.write(data)
         self.output_received.emit(data)
 
@@ -211,11 +217,13 @@ class ClaudeRunner(QObject):
             return
 
         data = self._process.readAllStandardError().data().decode("utf-8")
+        log.debug("Claude CLI stderr: {}", data)
         # Buffer stderr instead of emitting immediately to avoid premature status reset
         self._stderr_buffer.write(data)
 
     def _on_finished(self, exit_code: int, exit_status: QProcess.ExitStatus) -> None:
         """Handle process completion."""
+        log.debug("Claude CLI finished with exit_code={}, exit_status={}", exit_code, exit_status)
         # Skip final output parsing for stream-json format since all events
         # are already processed during streaming (avoids duplicate messages)
         if self._output_format != "stream-json":
@@ -224,6 +232,7 @@ class ClaudeRunner(QObject):
         # Emit buffered stderr as error if process failed
         stderr_content = self._stderr_buffer.getvalue().strip()
         if exit_code != 0 and stderr_content:
+            log.error("Claude CLI error: {}", stderr_content)
             self.error_occurred.emit(stderr_content)
 
         self.process_finished.emit(exit_code)
@@ -239,7 +248,9 @@ class ClaudeRunner(QObject):
             QProcess.ProcessError.ReadError: "Error reading from Claude CLI",
             QProcess.ProcessError.UnknownError: "Unknown error occurred",
         }
-        self.error_occurred.emit(error_messages.get(error, "Unknown error"))
+        error_msg = error_messages.get(error, "Unknown error")
+        log.error("Claude CLI process error: {}", error_msg)
+        self.error_occurred.emit(error_msg)
 
     def _parse_streaming_output(self, data: str) -> None:
         """Parse streaming JSON output."""
@@ -338,6 +349,7 @@ class ClaudeRunner(QObject):
     def write_stdin(self, data: str) -> None:
         """Write data to the process stdin (for interactive mode)."""
         if self._process and self.is_running:
+            log.debug("Writing to Claude CLI stdin: {}", data)
             self._process.write(data.encode("utf-8"))
 
     def respond_permission(self, accept: bool) -> None:
@@ -349,6 +361,7 @@ class ClaudeRunner(QObject):
         if self._process and self.is_running:
             # Send 'y' for accept, 'n' for reject followed by newline
             response = "y\n" if accept else "n\n"
+            log.debug("Responding to permission request: {}", response.strip())
             self._process.write(response.encode("utf-8"))
 
 

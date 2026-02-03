@@ -20,6 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "PySide6>=6.6.0",
+    "logbook>=1.7.0",
 ]
 
 [project.optional-dependencies]

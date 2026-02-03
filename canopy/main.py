@@ -5,6 +5,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import logbook
+from logbook import StreamHandler
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
@@ -32,12 +34,28 @@ def parse_args() -> argparse.Namespace:
         default=Path.cwd(),
         help="Path to a Git repository (defaults to current directory)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging",
+    )
     return parser.parse_args()
+
+
+def setup_logging(debug: bool = False) -> None:
+    """Setup logging with logbook."""
+    level = logbook.DEBUG if debug else logbook.INFO
+    handler = StreamHandler(sys.stderr, level=level)
+    handler.format_string = "[{record.time:%Y-%m-%d %H:%M:%S}] {record.level_name}: {record.channel}: {record.message}"
+    handler.push_application()
 
 
 def main() -> int:
     """Main entry point."""
     args = parse_args()
+
+    # Setup logging
+    setup_logging(debug=args.debug)
 
     # Enable high DPI scaling
     QApplication.setHighDpiScaleFactorRoundingPolicy(
