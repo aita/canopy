@@ -98,7 +98,7 @@ class MessageInput(QWidget):
 
         # Model selector
         model_label = QLabel("Model:")
-        model_label.setStyleSheet("color: #9ca3af; font-size: 11px;")
+        model_label.setStyleSheet("color: #9ca3af; font-size: 11px; border: none;")
         button_row.addWidget(model_label)
 
         self._model_combo = QComboBox()
@@ -161,7 +161,7 @@ class MessageInput(QWidget):
 
         # Hint text
         hint = QLabel("Enter to send, Shift+Enter for newline")
-        hint.setStyleSheet("color: #6b7280; font-size: 10px;")
+        hint.setStyleSheet("color: #6b7280; font-size: 10px; border: none;")
         button_row.addWidget(hint)
 
         # Cancel button (hidden by default)
