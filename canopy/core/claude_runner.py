@@ -140,9 +140,11 @@ class ClaudeRunner(QObject):
         # Build command arguments
         # Note: Working directory is set via setWorkingDirectory()
         # Use --permission-mode default to avoid interactive prompts
+        # --verbose is required when using --print with --output-format=stream-json
         args = [
             "--output-format", output_format,
             "--permission-mode", "default",
+            "--verbose",
             "--print", message,
         ]
 
