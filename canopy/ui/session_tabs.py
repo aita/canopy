@@ -166,12 +166,14 @@ class SessionTab(QWidget):
             self._chat_view.finish_streaming()
 
     def add_tool_use(self, tool_name: str, tool_input: dict) -> None:
-        """Add a tool use entry (no-op, command log removed)."""
-        pass
+        """Add a tool use entry with thinking indicator."""
+        if self._is_streaming:
+            self._chat_view.show_tool_use(tool_name, tool_input)
 
     def add_tool_result(self, tool_name: str, result: str) -> None:
-        """Add a tool result (no-op, command log removed)."""
-        pass
+        """Add a tool result to the streaming view."""
+        if self._is_streaming:
+            self._chat_view.show_tool_result(tool_name, result)
 
     def toggle_file_references(self) -> None:
         """Toggle file references panel visibility."""

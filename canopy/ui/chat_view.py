@@ -2,8 +2,8 @@
 
 from io import StringIO
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QTextCursor, QPalette, QColor
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
 )
 
 from canopy.models.session import Message, MessageRole
-from canopy.core.claude_runner import StreamEvent
 
 
 class MessageWidget(QFrame):
@@ -200,11 +199,15 @@ class ChatView(QWidget):
 class StreamingChatView(QWidget):
     """Chat view with streaming support - VSCode extension style."""
 
+    # Thinking indicators like Claude CLI
+    THINKING_WORDS = ["*hmm*", "*thonk*", "*ponders*", "*thinking*", "*processing*"]
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._messages: list[Message] = []
         self._streaming_buffer = StringIO()
         self._is_streaming = False
+        self._thinking_index = 0
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -289,6 +292,52 @@ class StreamingChatView(QWidget):
             self._streaming_buffer.write(text)
             self._streaming_widget.set_content(self._streaming_buffer.getvalue())
             self._scroll_to_bottom()
+
+    def show_tool_use(self, tool_name: str, tool_input: dict) -> None:
+        """Show tool use with thinking indicator."""
+        if self._is_streaming and hasattr(self, "_streaming_widget"):
+            # Get a thinking word (cycle through them)
+            thinking = self.THINKING_WORDS[self._thinking_index % len(self.THINKING_WORDS)]
+            self._thinking_index += 1
+
+            # Format tool info
+            if tool_name == "Bash":
+                cmd = tool_input.get("command", "")
+                desc = tool_input.get("description", "")
+                if desc:
+                    tool_info = f"{thinking} `{cmd}` ({desc})"
+                else:
+                    tool_info = f"{thinking} `{cmd}`"
+            elif tool_name in ("Read", "Write", "Edit"):
+                path = tool_input.get("file_path", "")
+                tool_info = f"{thinking} {tool_name}: {path}"
+            elif tool_name in ("Glob", "Grep"):
+                pattern = tool_input.get("pattern", "")
+                tool_info = f"{thinking} {tool_name}: {pattern}"
+            else:
+                tool_info = f"{thinking} {tool_name}"
+
+            # Append to buffer with newline if needed
+            current = self._streaming_buffer.getvalue()
+            if current and not current.endswith("\n"):
+                self._streaming_buffer.write("\n")
+            self._streaming_buffer.write(tool_info + "\n")
+            self._streaming_widget.set_content(self._streaming_buffer.getvalue())
+            self._scroll_to_bottom()
+
+    def show_tool_result(self, tool_name: str, result: str) -> None:
+        """Show tool result."""
+        if self._is_streaming and hasattr(self, "_streaming_widget"):
+            # Show abbreviated result
+            if result:
+                lines = result.split("\n")
+                if len(lines) > 5:
+                    preview = "\n".join(lines[:5]) + f"\n... ({len(lines)} lines)"
+                else:
+                    preview = result
+                self._streaming_buffer.write(f"```\n{preview}\n```\n")
+                self._streaming_widget.set_content(self._streaming_buffer.getvalue())
+                self._scroll_to_bottom()
 
     def finish_streaming(self) -> Message:
         """Finish streaming and convert to regular message."""
