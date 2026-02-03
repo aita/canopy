@@ -359,27 +359,8 @@ class MainWindow(QMainWindow):
             self._refresh_session_diff(session.id)
 
     def _refresh_session_diff(self, session_id) -> None:
-        """Refresh the diff view for a session."""
-        tab = self._session_tabs.get_tab(session_id)
-        if not tab:
-            return
-
-        session = self._session_manager.get_session(session_id)
-        if not session:
-            return
-
-        try:
-            # Get changed files
-            staged = tab.diff_viewer.is_staged_view
-            files = self._git_service.get_changed_files(
-                session.worktree_path, staged=staged
-            )
-            tab.diff_viewer.set_files(files)
-
-            # If a file is selected, refresh its diff
-            # This happens automatically when files are set
-        except Exception as e:
-            self._statusbar.showMessage(f"Error refreshing diff: {e}")
+        """Refresh the diff view for a session (no-op, diff viewer removed)."""
+        pass
 
     def _on_new_session(self) -> None:
         """Handle new session menu action."""
