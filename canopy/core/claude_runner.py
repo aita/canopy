@@ -124,6 +124,8 @@ class ClaudeRunner(QObject):
         self._session_id: str | None = None
         self._output_format: str = "json"
         self._events: list[StreamEvent] = []  # Collected stream events
+        # Track pending tool_use events by tool_use_id for permission matching
+        self._pending_tool_uses: dict[str, tuple[str, dict]] = {}  # tool_use_id -> (tool_name, tool_input)
 
     @property
     def is_running(self) -> bool:
@@ -169,6 +171,7 @@ class ClaudeRunner(QObject):
         self._stderr_buffer = StringIO()
         self._output_format = output_format
         self._events = []
+        self._pending_tool_uses = {}
 
         # Build command arguments
         # Note: Working directory is set via setWorkingDirectory()
@@ -217,9 +220,8 @@ class ClaudeRunner(QObject):
         log.debug("Starting Claude CLI: {} {}", self.claude_command, " ".join(args))
         log.debug("Working directory: {}", self._current_cwd)
         self._process.start()
-        # Close stdin to signal EOF - CLI should not wait for stdin input
-        # Permission requests are handled via stream-json events, not stdin
-        self._process.closeWriteChannel()
+        # Keep stdin open for permission responses
+        # When a tool needs approval, CLI will wait for y/n input
         self.process_started.emit()
 
     def _on_stdout(self) -> None:
@@ -300,6 +302,12 @@ class ClaudeRunner(QObject):
                     self._events.append(event)
                     self.stream_event.emit(event)
 
+                    # Track tool_use events for permission matching
+                    self._track_tool_use(obj)
+
+                    # Check for permission denial in tool_result
+                    self._check_permission_denial(obj)
+
                     # Emit specific signals based on event type
                     if event.type == "assistant":
                         if event.content:
@@ -325,6 +333,64 @@ class ClaudeRunner(QObject):
         # Update buffer with remaining incomplete line
         self._line_buffer = StringIO()
         self._line_buffer.write(buffer_content)
+
+    def _track_tool_use(self, obj: dict) -> None:
+        """Track tool_use events for permission matching."""
+        msg_type = obj.get("type", "")
+
+        # Track tool_use from assistant messages
+        if msg_type == "assistant":
+            message = obj.get("message", {})
+            content_blocks = message.get("content", [])
+            for block in content_blocks:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    tool_use_id = block.get("id", "")
+                    tool_name = block.get("name", "")
+                    tool_input = block.get("input", {})
+                    if tool_use_id and tool_name:
+                        self._pending_tool_uses[tool_use_id] = (tool_name, tool_input)
+                        log.debug("Tracked tool_use: {} {} {}", tool_use_id, tool_name, tool_input)
+
+        # Track standalone tool_use events
+        elif msg_type == "tool_use":
+            tool = obj.get("tool", {})
+            tool_use_id = obj.get("tool_use_id", "") or tool.get("id", "")
+            tool_name = tool.get("name", "")
+            tool_input = tool.get("input", {})
+            if tool_use_id and tool_name:
+                self._pending_tool_uses[tool_use_id] = (tool_name, tool_input)
+                log.debug("Tracked tool_use: {} {} {}", tool_use_id, tool_name, tool_input)
+
+    def _check_permission_denial(self, obj: dict) -> None:
+        """Check for permission denial in tool_result and emit permission_requested."""
+        msg_type = obj.get("type", "")
+
+        if msg_type == "user":
+            message = obj.get("message", {})
+            content_blocks = message.get("content", [])
+            for block in content_blocks:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    is_error = block.get("is_error", False)
+                    content = block.get("content", "")
+                    tool_use_id = block.get("tool_use_id", "")
+
+                    # Check if this is a permission denial
+                    if is_error and "requires approval" in content.lower():
+                        log.debug("Permission denial detected for tool_use_id: {}", tool_use_id)
+
+                        # Look up the tool details from tracked tool_uses
+                        if tool_use_id in self._pending_tool_uses:
+                            tool_name, tool_input = self._pending_tool_uses[tool_use_id]
+                            log.debug("Found tool details: {} {}", tool_name, tool_input)
+
+                            # Emit permission_requested signal
+                            self.permission_requested.emit(
+                                tool_use_id,  # Use tool_use_id as request_id
+                                tool_name,
+                                tool_input,
+                            )
+                        else:
+                            log.warning("Tool_use_id {} not found in pending tool_uses", tool_use_id)
 
     def _parse_final_output(self) -> None:
         """Parse the final complete output."""
