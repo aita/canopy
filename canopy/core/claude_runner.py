@@ -220,8 +220,9 @@ class ClaudeRunner(QObject):
         log.debug("Starting Claude CLI: {} {}", self.claude_command, " ".join(args))
         log.debug("Working directory: {}", self._current_cwd)
         self._process.start()
-        # Keep stdin open for permission responses
-        # When a tool needs approval, CLI will wait for y/n input
+        # Close stdin - CLI in --print mode doesn't wait for stdin input
+        # Permission approvals are handled by re-running with --allowedTools
+        self._process.closeWriteChannel()
         self.process_started.emit()
 
     def _on_stdout(self) -> None:
