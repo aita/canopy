@@ -2,12 +2,13 @@
 
 from io import StringIO
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QTextEdit,
@@ -202,12 +203,21 @@ class StreamingChatView(QWidget):
     # Thinking indicators like Claude CLI
     THINKING_WORDS = ["*hmm*", "*thonk*", "*ponders*", "*thinking*", "*processing*"]
 
+    # Signals for permission responses
+    permission_accepted = Signal(str)  # request_id
+    permission_rejected = Signal(str)  # request_id
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._messages: list[Message] = []
         self._streaming_buffer = StringIO()
         self._is_streaming = False
+        self._has_content = False
         self._thinking_index = 0
+        self._permission_widget: QWidget | None = None
+        self._current_permission_id: str | None = None
+        self._thinking_timer: QTimer | None = None
+        self._streaming_widget: StreamingMessageWidget | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -247,6 +257,20 @@ class StreamingChatView(QWidget):
         self._container_layout.setSpacing(0)
         self._container_layout.addStretch()
 
+        # Thinking indicator at the bottom (separate from messages)
+        self._thinking_indicator = QLabel()
+        self._thinking_indicator.setStyleSheet("""
+            QLabel {
+                color: #d97706;
+                font-size: 12px;
+                font-style: italic;
+                padding: 8px 16px;
+                background-color: transparent;
+            }
+        """)
+        self._thinking_indicator.setVisible(False)
+        self._container_layout.addWidget(self._thinking_indicator)
+
         self._scroll.setWidget(self._container)
         layout.addWidget(self._scroll)
 
@@ -255,9 +279,10 @@ class StreamingChatView(QWidget):
         self._messages.clear()
         self._streaming_buffer = StringIO()
         self._is_streaming = False
+        self._hide_thinking_indicator()
 
-        # Remove all message widgets
-        while self._container_layout.count() > 1:  # Keep the stretch
+        # Remove all message widgets (keep stretch and thinking indicator)
+        while self._container_layout.count() > 2:
             item = self._container_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
@@ -266,10 +291,10 @@ class StreamingChatView(QWidget):
         """Add a message to the chat."""
         self._messages.append(message)
 
-        # Create and insert widget
+        # Create and insert widget (before stretch and thinking indicator)
         widget = StreamingMessageWidget(message)
         self._container_layout.insertWidget(
-            self._container_layout.count() - 1, widget
+            self._container_layout.count() - 2, widget
         )
 
         self._scroll_to_bottom()
@@ -279,91 +304,209 @@ class StreamingChatView(QWidget):
         self._is_streaming = True
         self._streaming_buffer = StringIO()
         self._thinking_index = 0
+        self._has_content = False
 
-        # Create a streaming message widget with initial thinking indicator
-        self._streaming_widget = StreamingMessageWidget(streaming=True)
-        # Show initial thinking indicator in buffer
-        thinking = self.THINKING_WORDS[0]
-        self._streaming_buffer.write(thinking)
-        self._streaming_widget.set_content(thinking)
+        # Show thinking indicator immediately (separate from message)
+        self._thinking_indicator.setText(self.THINKING_WORDS[0])
+        self._thinking_indicator.setVisible(True)
 
-        self._container_layout.insertWidget(
-            self._container_layout.count() - 1, self._streaming_widget
-        )
+        # Start timer to rotate thinking words
+        if self._thinking_timer:
+            self._thinking_timer.stop()
+        self._thinking_timer = QTimer(self)
+        self._thinking_timer.timeout.connect(self._rotate_thinking)
+        self._thinking_timer.start(1500)  # Rotate every 1.5 seconds
+
         self._scroll_to_bottom()
 
-    def _clear_thinking_indicator(self) -> None:
-        """Clear the initial thinking indicator from buffer."""
-        current = self._streaming_buffer.getvalue()
-        # Remove initial thinking word if it's the only content
-        for word in self.THINKING_WORDS:
-            if current == word:
-                self._streaming_buffer = StringIO()
-                return
+    def _rotate_thinking(self) -> None:
+        """Rotate through thinking words."""
+        if self._is_streaming and not self._has_content:
+            self._thinking_index = (self._thinking_index + 1) % len(self.THINKING_WORDS)
+            self._thinking_indicator.setText(self.THINKING_WORDS[self._thinking_index])
+
+    def _hide_thinking_indicator(self) -> None:
+        """Hide the thinking indicator."""
+        self._thinking_indicator.setVisible(False)
+        if self._thinking_timer:
+            self._thinking_timer.stop()
+            self._thinking_timer = None
 
     def append_streaming_text(self, text: str) -> None:
         """Append text to the streaming message."""
-        if self._is_streaming and hasattr(self, "_streaming_widget"):
-            self._clear_thinking_indicator()
-            self._streaming_buffer.write(text)
-            self._streaming_widget.set_content(self._streaming_buffer.getvalue())
-            self._scroll_to_bottom()
+        if not self._is_streaming:
+            return
+
+        # Create streaming widget on first content
+        if not self._has_content:
+            self._has_content = True
+            self._hide_thinking_indicator()
+            self._streaming_widget = StreamingMessageWidget(streaming=True)
+            # Insert before the thinking indicator (which is at the end)
+            self._container_layout.insertWidget(
+                self._container_layout.count() - 2, self._streaming_widget
+            )
+
+        self._streaming_buffer.write(text)
+        self._streaming_widget.set_content(self._streaming_buffer.getvalue())
+        self._scroll_to_bottom()
 
     def show_tool_use(self, tool_name: str, tool_input: dict) -> None:
-        """Show tool use info."""
-        if self._is_streaming and hasattr(self, "_streaming_widget"):
-            self._clear_thinking_indicator()
+        """Show tool use info in the thinking indicator."""
+        if not self._is_streaming:
+            return
 
-            # Get next thinking word
-            self._thinking_index += 1
-            thinking = self.THINKING_WORDS[self._thinking_index % len(self.THINKING_WORDS)]
-
-            # Format tool info
-            if tool_name == "Bash":
-                cmd = tool_input.get("command", "")
-                desc = tool_input.get("description", "")
-                if desc:
-                    tool_info = f"{thinking} `{cmd}` ({desc})"
-                else:
-                    tool_info = f"{thinking} `{cmd}`"
-            elif tool_name in ("Read", "Write", "Edit"):
-                path = tool_input.get("file_path", "")
-                tool_info = f"{thinking} {tool_name}: {path}"
-            elif tool_name in ("Glob", "Grep"):
-                pattern = tool_input.get("pattern", "")
-                tool_info = f"{thinking} {tool_name}: {pattern}"
+        # Format tool description for the thinking indicator
+        if tool_name == "Bash":
+            cmd = tool_input.get("command", "")
+            desc = tool_input.get("description", "")
+            if desc:
+                tool_desc = f"`{cmd}` ({desc})"
             else:
-                tool_info = f"{thinking} {tool_name}"
+                tool_desc = f"`{cmd}`"
+        elif tool_name in ("Read", "Write", "Edit"):
+            path = tool_input.get("file_path", "")
+            tool_desc = f"{tool_name}: {path}"
+        elif tool_name in ("Glob", "Grep"):
+            pattern = tool_input.get("pattern", "")
+            tool_desc = f"{tool_name}: {pattern}"
+        else:
+            tool_desc = tool_name
 
-            # Append to buffer with newline if needed
-            current = self._streaming_buffer.getvalue()
-            if current and not current.endswith("\n"):
-                self._streaming_buffer.write("\n")
-            self._streaming_buffer.write(tool_info)
-            self._streaming_widget.set_content(self._streaming_buffer.getvalue())
-            self._scroll_to_bottom()
+        # Get next thinking word
+        self._thinking_index = (self._thinking_index + 1) % len(self.THINKING_WORDS)
+        thinking = self.THINKING_WORDS[self._thinking_index]
+
+        # Update thinking indicator with tool info
+        self._thinking_indicator.setText(f"{thinking} {tool_desc}")
+        self._thinking_indicator.setVisible(True)
+        self._scroll_to_bottom()
 
     def show_tool_result(self, tool_name: str, result: str) -> None:
-        """Show tool result."""
-        if self._is_streaming and hasattr(self, "_streaming_widget"):
-            # Show abbreviated result
-            if result:
-                lines = result.split("\n")
-                if len(lines) > 5:
-                    preview = "\n".join(lines[:5]) + f"\n... ({len(lines)} lines)"
-                else:
-                    preview = result
-                self._streaming_buffer.write(f"\n```\n{preview}\n```")
-                self._streaming_widget.set_content(self._streaming_buffer.getvalue())
-                self._scroll_to_bottom()
+        """Show tool result - thinking indicator continues to show progress."""
+        # Tool results are not shown in the message content
+        # The thinking indicator already shows what tool was used
+        pass
+
+    def show_permission_request(
+        self, request_id: str, tool_name: str, tool_input: dict
+    ) -> None:
+        """Show permission request with accept/reject buttons."""
+        # Remove existing permission widget if any
+        self._remove_permission_widget()
+        self._current_permission_id = request_id
+
+        # Format tool description
+        if tool_name == "Bash":
+            cmd = tool_input.get("command", "")
+            desc = tool_input.get("description", "")
+            if desc:
+                tool_desc = f"`{cmd}` ({desc})"
+            else:
+                tool_desc = f"`{cmd}`"
+        elif tool_name in ("Read", "Write", "Edit"):
+            path = tool_input.get("file_path", "")
+            tool_desc = f"{tool_name}: {path}"
+        else:
+            tool_desc = f"{tool_name}"
+
+        # Update thinking indicator to show permission request
+        self._thinking_indicator.setText(f"⚠️ Permission required: {tool_desc}")
+        self._thinking_indicator.setVisible(True)
+
+        # Create permission widget with buttons
+        self._permission_widget = QFrame()
+        self._permission_widget.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d;
+                border: 1px solid #d97706;
+                border-radius: 6px;
+                margin: 8px 16px;
+                padding: 12px;
+            }
+        """)
+
+        perm_layout = QVBoxLayout(self._permission_widget)
+        perm_layout.setContentsMargins(0, 0, 0, 0)
+        perm_layout.setSpacing(8)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+
+        accept_btn = QPushButton("Accept")
+        accept_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #22c55e;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 24px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #16a34a;
+            }
+        """)
+        accept_btn.clicked.connect(self._on_accept_permission)
+
+        reject_btn = QPushButton("Reject")
+        reject_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ef4444;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 24px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #dc2626;
+            }
+        """)
+        reject_btn.clicked.connect(self._on_reject_permission)
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(accept_btn)
+        btn_layout.addWidget(reject_btn)
+        btn_layout.addStretch()
+
+        perm_layout.addLayout(btn_layout)
+
+        # Insert before stretch
+        self._container_layout.insertWidget(
+            self._container_layout.count() - 1, self._permission_widget
+        )
+        self._scroll_to_bottom()
+
+    def _on_accept_permission(self) -> None:
+        """Handle accept button click."""
+        if self._current_permission_id:
+            self.permission_accepted.emit(self._current_permission_id)
+        self._remove_permission_widget()
+
+    def _on_reject_permission(self) -> None:
+        """Handle reject button click."""
+        if self._current_permission_id:
+            self.permission_rejected.emit(self._current_permission_id)
+        self._remove_permission_widget()
+
+    def _remove_permission_widget(self) -> None:
+        """Remove the permission widget."""
+        if self._permission_widget:
+            self._permission_widget.deleteLater()
+            self._permission_widget = None
+        self._current_permission_id = None
 
     def finish_streaming(self) -> Message:
         """Finish streaming and convert to regular message."""
         self._is_streaming = False
+        self._hide_thinking_indicator()
+
         content = self._streaming_buffer.getvalue()
         self._streaming_buffer = StringIO()
 
-        if hasattr(self, "_streaming_widget"):
+        if hasattr(self, "_streaming_widget") and self._streaming_widget:
             self._streaming_widget.finish_streaming()
 
         # Create message from streamed content
