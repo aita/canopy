@@ -201,8 +201,10 @@ class ClaudeRunner(QObject):
 
     def _on_finished(self, exit_code: int, exit_status: QProcess.ExitStatus) -> None:
         """Handle process completion."""
-        # Try to parse the complete output as JSON
-        self._parse_final_output()
+        # Skip final output parsing for stream-json format since all events
+        # are already processed during streaming (avoids duplicate messages)
+        if self._output_format != "stream-json":
+            self._parse_final_output()
         self.process_finished.emit(exit_code)
         self._process = None
 
