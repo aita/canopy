@@ -50,6 +50,9 @@ class MainWindow(QMainWindow):
         self._pending_creations: dict[Path, tuple[Path, str]] = {}  # path -> (repo_path, branch)
         self._pending_removals: dict[Path, Path] = {}  # path -> repo_path
 
+        # Track active permission dialog to prevent duplicates
+        self._permission_dialog: PermissionDialog | None = None
+
         self._setup_ui()
         self._setup_menu()
         self._setup_statusbar()
@@ -456,18 +459,31 @@ class MainWindow(QMainWindow):
         self, session: Session, request_id: str, tool_name: str, tool_input: dict
     ) -> None:
         """Handle permission request from Claude CLI."""
+        # Close any existing permission dialog first
+        if self._permission_dialog is not None:
+            self._permission_dialog.close()
+            self._permission_dialog.deleteLater()
+            self._permission_dialog = None
+
         dialog = PermissionDialog(tool_name, tool_input, self)
+        self._permission_dialog = dialog
 
         # Use non-blocking dialog to avoid freezing the UI
         # Connect to response signal to handle the result asynchronously
         def handle_response(response: str) -> None:
             accept = response in (PermissionDialog.ACCEPT, PermissionDialog.ACCEPT_ALWAYS)
             self._session_manager.respond_permission(session.id, accept)
+            self._permission_dialog = None
             dialog.deleteLater()
 
         dialog.response_given.connect(handle_response)
-        dialog.setModal(True)  # Keep it modal but non-blocking
+        # Use WindowModal to keep dialog modal but allow event processing
+        # This prevents UI freeze while still blocking input to parent
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
         dialog.show()
+        # Ensure dialog stays on top and gets focus
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _refresh_session_diff(self, session_id) -> None:
         """Refresh the diff view for a session (no-op, diff viewer removed)."""
