@@ -1,5 +1,6 @@
 """Session tab widget for managing multiple sessions."""
 
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -8,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSizePolicy,
+    QSplitter,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -16,15 +18,19 @@ from PySide6.QtWidgets import (
 from canopy.core.session_manager import SessionManager
 from canopy.models.session import Message, Session, SessionStatus
 
-from .chat_view import SimpleChatView
+from .chat_view import StreamingChatView
+from .command_log import CommandLogPanel
+from .diff_viewer import DiffViewer
+from .file_reference import FileReferencePanel
 from .message_input import MessageInput
 
 
 class SessionTab(QWidget):
-    """A single session tab containing chat view and input."""
+    """A single session tab containing chat view, diff viewer, and command log."""
 
-    message_submitted = Signal(str)
+    message_submitted = Signal(str, list)  # message, file_references
     cancel_requested = Signal()
+    diff_refresh_requested = Signal()
 
     def __init__(
         self,
@@ -33,6 +39,7 @@ class SessionTab(QWidget):
     ) -> None:
         super().__init__(parent)
         self._session = session
+        self._is_streaming = False
         self._setup_ui()
         self._connect_signals()
         self._load_messages()
@@ -46,7 +53,7 @@ class SessionTab(QWidget):
         # Session info header - VSCode extension style
         header = QWidget()
         header.setStyleSheet("""
-            background-color: palette(window);
+            background-color: #1e1e1e;
             border-bottom: 1px solid #3a3a3a;
         """)
         header_layout = QHBoxLayout(header)
@@ -64,21 +71,75 @@ class SessionTab(QWidget):
 
         layout.addWidget(header)
 
-        # Chat view
-        self._chat_view = SimpleChatView()
+        # Main content area with splitter
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #3a3a3a;
+            }
+        """)
+
+        # Left side: Chat + Input
+        chat_container = QWidget()
+        chat_layout = QVBoxLayout(chat_container)
+        chat_layout.setContentsMargins(0, 0, 0, 0)
+        chat_layout.setSpacing(0)
+
+        # Chat view (streaming enabled)
+        self._chat_view = StreamingChatView()
         self._chat_view.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        layout.addWidget(self._chat_view)
+        chat_layout.addWidget(self._chat_view)
+
+        # File references panel (collapsible)
+        self._file_reference_panel = FileReferencePanel()
+        self._file_reference_panel.set_worktree(self._session.worktree_path)
+        self._file_reference_panel.setMaximumHeight(150)
+        self._file_reference_panel.setVisible(False)  # Hidden by default
+        chat_layout.addWidget(self._file_reference_panel)
 
         # Message input
         self._message_input = MessageInput()
-        layout.addWidget(self._message_input)
+        chat_layout.addWidget(self._message_input)
+
+        main_splitter.addWidget(chat_container)
+
+        # Right side: Diff viewer + Command log (vertical splitter)
+        right_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Diff viewer
+        self._diff_viewer = DiffViewer()
+        self._diff_viewer.set_worktree(self._session.worktree_path)
+        right_splitter.addWidget(self._diff_viewer)
+
+        # Command log
+        self._command_log = CommandLogPanel()
+        right_splitter.addWidget(self._command_log)
+
+        right_splitter.setSizes([400, 200])
+        main_splitter.addWidget(right_splitter)
+
+        # Set initial sizes (chat 60%, right panels 40%)
+        main_splitter.setSizes([600, 400])
+
+        layout.addWidget(main_splitter)
 
     def _connect_signals(self) -> None:
         """Connect signals."""
-        self._message_input.message_submitted.connect(self.message_submitted.emit)
+        self._message_input.message_submitted.connect(self._on_message_submitted)
         self._message_input.cancel_requested.connect(self.cancel_requested.emit)
+        self._diff_viewer.file_selected.connect(self._on_diff_file_selected)
+
+    def _on_message_submitted(self, message: str) -> None:
+        """Handle message submission with file references."""
+        refs = self._file_reference_panel.get_references()
+        self.message_submitted.emit(message, refs)
+
+    def _on_diff_file_selected(self, file_path: str) -> None:
+        """Handle file selection in diff viewer."""
+        # This will trigger a diff load - parent will handle via git service
+        self.diff_refresh_requested.emit()
 
     def _load_messages(self) -> None:
         """Load existing messages into the chat view."""
@@ -123,6 +184,16 @@ class SessionTab(QWidget):
         """Get the session."""
         return self._session
 
+    @property
+    def diff_viewer(self) -> DiffViewer:
+        """Get the diff viewer."""
+        return self._diff_viewer
+
+    @property
+    def command_log(self) -> CommandLogPanel:
+        """Get the command log panel."""
+        return self._command_log
+
     def add_message(self, message: Message) -> None:
         """Add a message to the chat view."""
         self._chat_view.add_message(message)
@@ -133,6 +204,40 @@ class SessionTab(QWidget):
         self._update_status()
         self._message_input.set_processing(status == SessionStatus.RUNNING)
 
+    def start_streaming(self) -> None:
+        """Start streaming mode for assistant response."""
+        self._is_streaming = True
+        self._chat_view.start_streaming()
+
+    def append_streaming_text(self, text: str) -> None:
+        """Append text to streaming response."""
+        if self._is_streaming:
+            self._chat_view.append_streaming_text(text)
+
+    def finish_streaming(self) -> None:
+        """Finish streaming mode."""
+        if self._is_streaming:
+            self._is_streaming = False
+            self._chat_view.finish_streaming()
+
+    def add_tool_use(self, tool_name: str, tool_input: dict) -> None:
+        """Add a tool use entry to the command log."""
+        self._command_log.add_tool_use(tool_name, tool_input)
+
+    def add_tool_result(self, tool_name: str, result: str) -> None:
+        """Add a tool result to the command log."""
+        self._command_log.add_tool_result(tool_name, result)
+
+    def toggle_file_references(self) -> None:
+        """Toggle file references panel visibility."""
+        self._file_reference_panel.setVisible(
+            not self._file_reference_panel.isVisible()
+        )
+
+    def add_file_reference(self, file_path: Path) -> None:
+        """Add a file reference."""
+        self._file_reference_panel.add_file(file_path)
+
     def focus_input(self) -> None:
         """Focus the message input."""
         self._message_input.focus()
@@ -142,7 +247,7 @@ class SessionTabWidget(QTabWidget):
     """Tab widget for managing multiple sessions."""
 
     session_closed = Signal(UUID)
-    message_submitted = Signal(UUID, str)
+    message_submitted = Signal(UUID, str, list)  # session_id, message, file_refs
     cancel_requested = Signal(UUID)
 
     def __init__(
@@ -153,6 +258,7 @@ class SessionTabWidget(QTabWidget):
         super().__init__(parent)
         self._session_manager = session_manager
         self._tabs: dict[UUID, SessionTab] = {}
+        self._streaming_sessions: set[UUID] = set()
 
         self._setup_ui()
         self._connect_signals()
@@ -162,6 +268,26 @@ class SessionTabWidget(QTabWidget):
         self.setTabsClosable(True)
         self.setMovable(True)
         self.setDocumentMode(True)
+        self.setStyleSheet("""
+            QTabWidget::pane {
+                border: none;
+                background-color: #1e1e1e;
+            }
+            QTabBar::tab {
+                background-color: #2d2d2d;
+                color: #9ca3af;
+                padding: 8px 16px;
+                border: none;
+                border-right: 1px solid #3a3a3a;
+            }
+            QTabBar::tab:selected {
+                background-color: #1e1e1e;
+                color: #ffffff;
+            }
+            QTabBar::tab:hover {
+                background-color: #3a3a3a;
+            }
+        """)
 
         # Placeholder when no tabs
         self._placeholder = QLabel("Select a worktree and create a session to start")
@@ -169,6 +295,7 @@ class SessionTabWidget(QTabWidget):
             color: #6b7280;
             padding: 40px;
             font-size: 13px;
+            background-color: #1e1e1e;
         """)
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -179,6 +306,11 @@ class SessionTabWidget(QTabWidget):
         # Connect to session manager signals
         self._session_manager.message_received.connect(self._on_message_received)
         self._session_manager.status_changed.connect(self._on_status_changed)
+
+        # Connect stream-json signals
+        self._session_manager.streaming_text.connect(self._on_streaming_text)
+        self._session_manager.tool_use_started.connect(self._on_tool_use)
+        self._session_manager.tool_result_received.connect(self._on_tool_result)
 
     def add_session(self, session: Session) -> SessionTab:
         """Add a session tab."""
@@ -191,7 +323,7 @@ class SessionTabWidget(QTabWidget):
         # Create new tab
         tab = SessionTab(session)
         tab.message_submitted.connect(
-            lambda msg: self.message_submitted.emit(session.id, msg)
+            lambda msg, refs: self.message_submitted.emit(session.id, msg, refs)
         )
         tab.cancel_requested.connect(
             lambda: self.cancel_requested.emit(session.id)
@@ -244,7 +376,37 @@ class SessionTabWidget(QTabWidget):
         """Handle status change from session manager."""
         tab = self._tabs.get(session.id)
         if tab:
+            # Start streaming when running starts
+            if status == SessionStatus.RUNNING:
+                if session.id not in self._streaming_sessions:
+                    self._streaming_sessions.add(session.id)
+                    tab.start_streaming()
+            else:
+                # Finish streaming when status changes from running
+                if session.id in self._streaming_sessions:
+                    self._streaming_sessions.discard(session.id)
+                    tab.finish_streaming()
+
             tab.set_status(status)
 
+    def _on_streaming_text(self, session: Session, text: str) -> None:
+        """Handle streaming text from Claude."""
+        tab = self._tabs.get(session.id)
+        if tab and session.id in self._streaming_sessions:
+            tab.append_streaming_text(text)
 
-# Qt already imported at top of file
+    def _on_tool_use(self, session: Session, tool_name: str, tool_input: dict) -> None:
+        """Handle tool use event."""
+        tab = self._tabs.get(session.id)
+        if tab:
+            tab.add_tool_use(tool_name, tool_input)
+
+    def _on_tool_result(self, session: Session, tool_name: str, result: str) -> None:
+        """Handle tool result event."""
+        tab = self._tabs.get(session.id)
+        if tab:
+            tab.add_tool_result(tool_name, result)
+
+    def get_tab(self, session_id: UUID) -> Optional[SessionTab]:
+        """Get a session tab by ID."""
+        return self._tabs.get(session_id)
