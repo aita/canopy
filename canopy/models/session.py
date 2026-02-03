@@ -60,6 +60,7 @@ class Session:
     messages: list[Message] = field(default_factory=list)
     status: SessionStatus = SessionStatus.IDLE
     claude_session_id: str | None = None  # For --resume
+    base_branch: str | None = None  # The branch this session is based on
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -81,6 +82,7 @@ class Session:
             "messages": [m.to_dict() for m in self.messages],
             "status": self.status.value,
             "claude_session_id": self.claude_session_id,
+            "base_branch": self.base_branch,
         }
 
     @classmethod
@@ -93,6 +95,7 @@ class Session:
             created_at=datetime.fromisoformat(data["created_at"]),
             status=SessionStatus(data["status"]),
             claude_session_id=data.get("claude_session_id"),
+            base_branch=data.get("base_branch"),
         )
         session.messages = [Message.from_dict(m) for m in data.get("messages", [])]
         return session
