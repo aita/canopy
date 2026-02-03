@@ -323,7 +323,7 @@ class MainWindow(QMainWindow):
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             session_name = f"session-{timestamp}"
-            branch_name = f"canopy/{session_name}"
+            branch_name = f"sessions/{session_name}"
 
             # Create worktree in {repo_path}.canopy directory (sibling to repo)
             canopy_dir = Path(str(self._repository.path) + ".canopy")
