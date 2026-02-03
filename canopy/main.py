@@ -35,8 +35,11 @@ def main() -> int:
     # if stylesheet:
     #     app.setStyleSheet(stylesheet)
 
-    # Create and show main window
-    window = MainWindow()
+    # Get the current working directory as the repository path
+    repo_path = Path.cwd()
+
+    # Create and show main window with the repository path
+    window = MainWindow(repo_path=repo_path)
     window.show()
 
     return app.exec()
