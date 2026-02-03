@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSizePolicy,
-    QSplitter,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -18,18 +17,15 @@ from canopy.core.session_manager import SessionManager
 from canopy.models.session import Message, Session, SessionStatus
 
 from .chat_view import StreamingChatView
-from .command_log import CommandLogPanel
-from .diff_viewer import DiffViewer
 from .file_reference import FileReferencePanel
 from .message_input import MessageInput
 
 
 class SessionTab(QWidget):
-    """A single session tab containing chat view, diff viewer, and command log."""
+    """A single session tab containing chat view and message input."""
 
     message_submitted = Signal(str, list)  # message, file_references
     cancel_requested = Signal()
-    diff_refresh_requested = Signal()
 
     def __init__(
         self,
@@ -49,14 +45,15 @@ class SessionTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Session info header - VSCode extension style
+        # Session info header - compact style
         header = QWidget()
+        header.setFixedHeight(36)
         header.setStyleSheet("""
             background-color: #1e1e1e;
             border-bottom: 1px solid #3a3a3a;
         """)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 10, 12, 10)
+        header_layout.setContentsMargins(12, 0, 12, 0)
 
         self._branch_label = QLabel()
         self._update_header()
@@ -70,75 +67,33 @@ class SessionTab(QWidget):
 
         layout.addWidget(header)
 
-        # Main content area with splitter
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_splitter.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #3a3a3a;
-            }
-        """)
-
-        # Left side: Chat + Input
-        chat_container = QWidget()
-        chat_layout = QVBoxLayout(chat_container)
-        chat_layout.setContentsMargins(0, 0, 0, 0)
-        chat_layout.setSpacing(0)
-
         # Chat view (streaming enabled)
         self._chat_view = StreamingChatView()
         self._chat_view.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        chat_layout.addWidget(self._chat_view)
+        layout.addWidget(self._chat_view)
 
         # File references panel (collapsible)
         self._file_reference_panel = FileReferencePanel()
         self._file_reference_panel.set_worktree(self._session.worktree_path)
         self._file_reference_panel.setMaximumHeight(150)
         self._file_reference_panel.setVisible(False)  # Hidden by default
-        chat_layout.addWidget(self._file_reference_panel)
+        layout.addWidget(self._file_reference_panel)
 
         # Message input
         self._message_input = MessageInput()
-        chat_layout.addWidget(self._message_input)
-
-        main_splitter.addWidget(chat_container)
-
-        # Right side: Diff viewer + Command log (vertical splitter)
-        right_splitter = QSplitter(Qt.Orientation.Vertical)
-
-        # Diff viewer
-        self._diff_viewer = DiffViewer()
-        self._diff_viewer.set_worktree(self._session.worktree_path)
-        right_splitter.addWidget(self._diff_viewer)
-
-        # Command log
-        self._command_log = CommandLogPanel()
-        right_splitter.addWidget(self._command_log)
-
-        right_splitter.setSizes([400, 200])
-        main_splitter.addWidget(right_splitter)
-
-        # Set initial sizes (chat 60%, right panels 40%)
-        main_splitter.setSizes([600, 400])
-
-        layout.addWidget(main_splitter)
+        layout.addWidget(self._message_input)
 
     def _connect_signals(self) -> None:
         """Connect signals."""
         self._message_input.message_submitted.connect(self._on_message_submitted)
         self._message_input.cancel_requested.connect(self.cancel_requested.emit)
-        self._diff_viewer.file_selected.connect(self._on_diff_file_selected)
 
     def _on_message_submitted(self, message: str) -> None:
         """Handle message submission with file references."""
         refs = self._file_reference_panel.get_references()
         self.message_submitted.emit(message, refs)
-
-    def _on_diff_file_selected(self, file_path: str) -> None:
-        """Handle file selection in diff viewer."""
-        # This will trigger a diff load - parent will handle via git service
-        self.diff_refresh_requested.emit()
 
     def _load_messages(self) -> None:
         """Load existing messages into the chat view."""
@@ -183,16 +138,6 @@ class SessionTab(QWidget):
         """Get the session."""
         return self._session
 
-    @property
-    def diff_viewer(self) -> DiffViewer:
-        """Get the diff viewer."""
-        return self._diff_viewer
-
-    @property
-    def command_log(self) -> CommandLogPanel:
-        """Get the command log panel."""
-        return self._command_log
-
     def add_message(self, message: Message) -> None:
         """Add a message to the chat view."""
         self._chat_view.add_message(message)
@@ -220,12 +165,12 @@ class SessionTab(QWidget):
             self._chat_view.finish_streaming()
 
     def add_tool_use(self, tool_name: str, tool_input: dict) -> None:
-        """Add a tool use entry to the command log."""
-        self._command_log.add_tool_use(tool_name, tool_input)
+        """Add a tool use entry (no-op, command log removed)."""
+        pass
 
     def add_tool_result(self, tool_name: str, result: str) -> None:
-        """Add a tool result to the command log."""
-        self._command_log.add_tool_result(tool_name, result)
+        """Add a tool result (no-op, command log removed)."""
+        pass
 
     def toggle_file_references(self) -> None:
         """Toggle file references panel visibility."""
