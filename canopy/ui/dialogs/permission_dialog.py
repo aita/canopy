@@ -1,6 +1,6 @@
 """Dialog for tool permission requests from Claude CLI."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -14,6 +14,10 @@ from PySide6.QtWidgets import (
 
 class PermissionDialog(QDialog):
     """Dialog for approving tool executions from Claude CLI."""
+
+    # Signal emitted when user responds (response_code: str)
+    # This allows non-blocking dialog usage with dialog.show()
+    response_given = Signal(str)
 
     # Response codes
     ACCEPT = "accept"
@@ -30,6 +34,7 @@ class PermissionDialog(QDialog):
         self._tool_name = tool_name
         self._tool_input = tool_input
         self._response = self.REJECT
+        self._response_emitted = False  # Track if signal was already emitted
 
         self._setup_ui()
         self._connect_signals()
@@ -174,20 +179,33 @@ class PermissionDialog(QDialog):
         self._accept_btn.clicked.connect(self._on_accept)
         self._accept_always_btn.clicked.connect(self._on_accept_always)
 
+    def _emit_response(self, response: str) -> None:
+        """Emit response signal only once."""
+        if not self._response_emitted:
+            self._response_emitted = True
+            self._response = response
+            self.response_given.emit(response)
+
     def _on_reject(self) -> None:
         """Handle reject button."""
-        self._response = self.REJECT
+        self._emit_response(self.REJECT)
         self.reject()
 
     def _on_accept(self) -> None:
         """Handle accept button."""
-        self._response = self.ACCEPT
+        self._emit_response(self.ACCEPT)
         self.accept()
 
     def _on_accept_always(self) -> None:
         """Handle accept always button."""
-        self._response = self.ACCEPT_ALWAYS
+        self._emit_response(self.ACCEPT_ALWAYS)
         self.accept()
+
+    def closeEvent(self, event) -> None:
+        """Handle dialog close event (X button or Escape key)."""
+        # Emit reject response if dialog is closed without explicit button click
+        self._emit_response(self.REJECT)
+        super().closeEvent(event)
 
     def get_response(self) -> str:
         """Get the user's response."""

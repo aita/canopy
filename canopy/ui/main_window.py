@@ -7,7 +7,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
-    QDialog,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -440,15 +439,17 @@ class MainWindow(QMainWindow):
     ) -> None:
         """Handle permission request from Claude CLI."""
         dialog = PermissionDialog(tool_name, tool_input, self)
-        result = dialog.exec()
 
-        # Respond to the permission request
-        if result == QDialog.DialogCode.Accepted:
-            response = dialog.get_response()
+        # Use non-blocking dialog to avoid freezing the UI
+        # Connect to response signal to handle the result asynchronously
+        def handle_response(response: str) -> None:
             accept = response in (PermissionDialog.ACCEPT, PermissionDialog.ACCEPT_ALWAYS)
             self._session_manager.respond_permission(session.id, accept)
-        else:
-            self._session_manager.respond_permission(session.id, False)
+            dialog.deleteLater()
+
+        dialog.response_given.connect(handle_response)
+        dialog.setModal(True)  # Keep it modal but non-blocking
+        dialog.show()
 
     def _refresh_session_diff(self, session_id) -> None:
         """Refresh the diff view for a session (no-op, diff viewer removed)."""
