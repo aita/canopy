@@ -30,10 +30,10 @@ def main() -> int:
     app.setOrganizationName("Canopy")
     app.setOrganizationDomain("canopy.local")
 
-    # Load stylesheet
-    stylesheet = load_stylesheet()
-    if stylesheet:
-        app.setStyleSheet(stylesheet)
+    # Stylesheet disabled - use system default
+    # stylesheet = load_stylesheet()
+    # if stylesheet:
+    #     app.setStyleSheet(stylesheet)
 
     # Create and show main window
     window = MainWindow()
