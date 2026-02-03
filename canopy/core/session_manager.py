@@ -38,6 +38,10 @@ class SessionManager(QObject):
         self._sessions: dict[UUID, Session] = {}
         self._runners: dict[UUID, ClaudeRunner] = {}
         self._claude_command = claude_command
+        # Store last message params for retry with --allowedTools
+        self._pending_messages: dict[UUID, dict] = {}  # session_id -> {message, file_refs, model}
+        # Store pending permission requests
+        self._pending_permissions: dict[UUID, dict] = {}  # session_id -> {tool_name, tool_input}
 
         # Load saved sessions
         self._load_sessions()
@@ -110,6 +114,8 @@ class SessionManager(QObject):
         message: str,
         file_references: list[str] | None = None,
         model: str | None = None,
+        allowed_tools: list[str] | None = None,
+        add_user_message: bool = True,
     ) -> None:
         """Send a message to a session.
 
@@ -118,6 +124,8 @@ class SessionManager(QObject):
             message: The message to send
             file_references: Optional list of file references to include
             model: Model ID to use (optional)
+            allowed_tools: List of pre-approved tool patterns (for permission retry)
+            add_user_message: Whether to add the message to chat history
         """
         session = self._sessions.get(session_id)
         if not session:
@@ -136,9 +144,18 @@ class SessionManager(QObject):
             refs = "\n".join(f"@{ref}" for ref in file_references)
             full_message = f"{refs}\n\n{message}"
 
-        # Add user message to session
-        user_msg = session.add_message(MessageRole.USER, message)
-        self.message_received.emit(session, user_msg)
+        # Store message params for potential retry with --allowedTools
+        self._pending_messages[session_id] = {
+            "message": message,
+            "full_message": full_message,
+            "file_references": file_references,
+            "model": model,
+        }
+
+        # Add user message to session (skip on retry)
+        if add_user_message:
+            user_msg = session.add_message(MessageRole.USER, message)
+            self.message_received.emit(session, user_msg)
 
         # Update status
         session.status = SessionStatus.RUNNING
@@ -151,6 +168,7 @@ class SessionManager(QObject):
             output_format="stream-json",
             resume_session=session.claude_session_id,
             model=model,
+            allowed_tools=allowed_tools,
         )
 
     def cancel_request(self, session_id: UUID) -> None:
@@ -231,18 +249,59 @@ class SessionManager(QObject):
         """Handle permission request event."""
         session = self._sessions.get(session_id)
         if session:
+            # Store permission info for potential retry
+            self._pending_permissions[session_id] = {
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+            }
             self.permission_requested.emit(session, request_id, tool_name, tool_input)
 
     def respond_permission(self, session_id: UUID, accept: bool) -> None:
         """Respond to a permission request.
 
+        If accepted, re-run the last message with --allowedTools for the denied tool.
+        If rejected, just clear the pending permission.
+
         Args:
             session_id: The session ID
             accept: True to accept, False to reject
         """
-        runner = self._runners.get(session_id)
-        if runner:
-            runner.respond_permission(accept)
+        perm = self._pending_permissions.pop(session_id, None)
+        if not perm:
+            return
+
+        if not accept:
+            return  # Just ignore rejection
+
+        # Build the tool pattern for --allowedTools
+        tool_name = perm["tool_name"]
+        tool_input = perm["tool_input"]
+
+        # Create a tool pattern that allows this specific command
+        # Format: "ToolName(pattern)" or just "ToolName" for full access
+        if tool_name == "Bash":
+            cmd = tool_input.get("command", "")
+            # Use exact command as pattern (escape special chars if needed)
+            tool_pattern = f"Bash({cmd})"
+        elif tool_name in ("Read", "Write", "Edit"):
+            path = tool_input.get("file_path", "")
+            tool_pattern = f"{tool_name}({path})"
+        else:
+            # For other tools, allow the entire tool
+            tool_pattern = tool_name
+
+        # Get the pending message and re-send with --allowedTools
+        pending = self._pending_messages.get(session_id)
+        if pending:
+            self.send_message(
+                session_id=session_id,
+                message=pending["message"],
+                file_references=pending["file_references"],
+                model=pending["model"],
+                allowed_tools=[tool_pattern],
+                add_user_message=False,  # Don't add duplicate user message
+            )
 
     def _on_response(self, session_id: UUID, response: dict) -> None:
         """Handle a response from Claude."""

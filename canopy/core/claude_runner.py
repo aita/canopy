@@ -5,7 +5,10 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 
+import logbook
 from PySide6.QtCore import QObject, QProcess, Signal
+
+log = logbook.Logger(__name__)
 
 
 @dataclass
@@ -29,16 +32,34 @@ class StreamEvent:
         event = cls(type=data.get("type", "unknown"))
         event.session_id = data.get("session_id")
 
-        if event.type == "init":
+        # Handle system events (type: system, subtype: init)
+        if event.type == "system":
+            subtype = data.get("subtype", "")
+            if subtype == "init":
+                event.type = "init"  # Normalize to "init" for easier handling
+            event.session_id = data.get("session_id")
+            event.message = data
+        elif event.type == "init":
             event.session_id = data.get("session_id")
             event.message = data.get("message")
-        elif event.type in ("assistant", "user_input"):
+        elif event.type in ("assistant", "user", "user_input"):
             event.message = data.get("message", {})
             content_blocks = event.message.get("content", [])
             texts = []
             for block in content_blocks:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    texts.append(block.get("text", ""))
+                if isinstance(block, dict):
+                    block_type = block.get("type")
+                    if block_type == "text":
+                        texts.append(block.get("text", ""))
+                    elif block_type == "tool_use":
+                        # Extract tool_use info from assistant message
+                        event.tool_name = block.get("name")
+                        event.tool_input = block.get("input")
+                    elif block_type == "tool_result":
+                        # Extract tool_result from user message
+                        content = block.get("content", "")
+                        if content:
+                            texts.append(content)
                 elif isinstance(block, str):
                     texts.append(block)
             event.content = "\n".join(texts)
@@ -50,7 +71,7 @@ class StreamEvent:
             event.tool_result = data.get("tool", {}).get("result")
         elif event.type == "result":
             event.session_id = data.get("session_id")
-            event.cost_usd = data.get("cost_usd")
+            event.cost_usd = data.get("total_cost_usd") or data.get("cost_usd")
             event.duration_ms = data.get("duration_ms")
             # Result content
             result = data.get("result", "")
@@ -103,6 +124,8 @@ class ClaudeRunner(QObject):
         self._session_id: str | None = None
         self._output_format: str = "json"
         self._events: list[StreamEvent] = []  # Collected stream events
+        # Track pending tool_use events by tool_use_id for permission matching
+        self._pending_tool_uses: dict[str, tuple[str, dict]] = {}  # tool_use_id -> (tool_name, tool_input)
 
     @property
     def is_running(self) -> bool:
@@ -148,14 +171,16 @@ class ClaudeRunner(QObject):
         self._stderr_buffer = StringIO()
         self._output_format = output_format
         self._events = []
+        self._pending_tool_uses = {}
 
         # Build command arguments
         # Note: Working directory is set via setWorkingDirectory()
         # Use --permission-mode default to avoid interactive prompts
+        # --print is a boolean flag, message is passed as positional argument
         args = [
             "--output-format", output_format,
             "--permission-mode", "default",
-            "--print", message,
+            "--print",
         ]
 
         # stream-json with --print requires --verbose
@@ -171,6 +196,9 @@ class ClaudeRunner(QObject):
 
         if model:
             args.extend(["--model", model])
+
+        # Message is passed as positional argument at the end
+        args.append(message)
 
         self._start_process(args)
 
@@ -189,8 +217,12 @@ class ClaudeRunner(QObject):
         self._process.finished.connect(self._on_finished)
         self._process.errorOccurred.connect(self._on_error)
 
+        log.debug("Starting Claude CLI: {} {}", self.claude_command, " ".join(args))
+        log.debug("Working directory: {}", self._current_cwd)
         self._process.start()
-        # Note: We do NOT close stdin to allow responding to permission requests
+        # Close stdin - CLI in --print mode doesn't wait for stdin input
+        # Permission approvals are handled by re-running with --allowedTools
+        self._process.closeWriteChannel()
         self.process_started.emit()
 
     def _on_stdout(self) -> None:
@@ -199,6 +231,7 @@ class ClaudeRunner(QObject):
             return
 
         data = self._process.readAllStandardOutput().data().decode("utf-8")
+        log.debug("Claude CLI stdout: {}", data)
         self._output_buffer.write(data)
         self.output_received.emit(data)
 
@@ -211,11 +244,13 @@ class ClaudeRunner(QObject):
             return
 
         data = self._process.readAllStandardError().data().decode("utf-8")
+        log.debug("Claude CLI stderr: {}", data)
         # Buffer stderr instead of emitting immediately to avoid premature status reset
         self._stderr_buffer.write(data)
 
     def _on_finished(self, exit_code: int, exit_status: QProcess.ExitStatus) -> None:
         """Handle process completion."""
+        log.debug("Claude CLI finished with exit_code={}, exit_status={}", exit_code, exit_status)
         # Skip final output parsing for stream-json format since all events
         # are already processed during streaming (avoids duplicate messages)
         if self._output_format != "stream-json":
@@ -224,6 +259,7 @@ class ClaudeRunner(QObject):
         # Emit buffered stderr as error if process failed
         stderr_content = self._stderr_buffer.getvalue().strip()
         if exit_code != 0 and stderr_content:
+            log.error("Claude CLI error: {}", stderr_content)
             self.error_occurred.emit(stderr_content)
 
         self.process_finished.emit(exit_code)
@@ -239,7 +275,9 @@ class ClaudeRunner(QObject):
             QProcess.ProcessError.ReadError: "Error reading from Claude CLI",
             QProcess.ProcessError.UnknownError: "Unknown error occurred",
         }
-        self.error_occurred.emit(error_messages.get(error, "Unknown error"))
+        error_msg = error_messages.get(error, "Unknown error")
+        log.error("Claude CLI process error: {}", error_msg)
+        self.error_occurred.emit(error_msg)
 
     def _parse_streaming_output(self, data: str) -> None:
         """Parse streaming JSON output."""
@@ -265,9 +303,19 @@ class ClaudeRunner(QObject):
                     self._events.append(event)
                     self.stream_event.emit(event)
 
+                    # Track tool_use events for permission matching
+                    self._track_tool_use(obj)
+
+                    # Check for permission denial in tool_result
+                    self._check_permission_denial(obj)
+
                     # Emit specific signals based on event type
-                    if event.type == "assistant" and event.content:
-                        self.assistant_text.emit(event.content)
+                    if event.type == "assistant":
+                        if event.content:
+                            self.assistant_text.emit(event.content)
+                        # Assistant message may contain tool_use
+                        if event.tool_name:
+                            self.tool_use_started.emit(event.tool_name, event.tool_input or {})
                     elif event.type == "tool_use" and event.tool_name:
                         self.tool_use_started.emit(event.tool_name, event.tool_input or {})
                     elif event.type == "tool_result" and event.tool_name:
@@ -286,6 +334,64 @@ class ClaudeRunner(QObject):
         # Update buffer with remaining incomplete line
         self._line_buffer = StringIO()
         self._line_buffer.write(buffer_content)
+
+    def _track_tool_use(self, obj: dict) -> None:
+        """Track tool_use events for permission matching."""
+        msg_type = obj.get("type", "")
+
+        # Track tool_use from assistant messages
+        if msg_type == "assistant":
+            message = obj.get("message", {})
+            content_blocks = message.get("content", [])
+            for block in content_blocks:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    tool_use_id = block.get("id", "")
+                    tool_name = block.get("name", "")
+                    tool_input = block.get("input", {})
+                    if tool_use_id and tool_name:
+                        self._pending_tool_uses[tool_use_id] = (tool_name, tool_input)
+                        log.debug("Tracked tool_use: {} {} {}", tool_use_id, tool_name, tool_input)
+
+        # Track standalone tool_use events
+        elif msg_type == "tool_use":
+            tool = obj.get("tool", {})
+            tool_use_id = obj.get("tool_use_id", "") or tool.get("id", "")
+            tool_name = tool.get("name", "")
+            tool_input = tool.get("input", {})
+            if tool_use_id and tool_name:
+                self._pending_tool_uses[tool_use_id] = (tool_name, tool_input)
+                log.debug("Tracked tool_use: {} {} {}", tool_use_id, tool_name, tool_input)
+
+    def _check_permission_denial(self, obj: dict) -> None:
+        """Check for permission denial in tool_result and emit permission_requested."""
+        msg_type = obj.get("type", "")
+
+        if msg_type == "user":
+            message = obj.get("message", {})
+            content_blocks = message.get("content", [])
+            for block in content_blocks:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    is_error = block.get("is_error", False)
+                    content = block.get("content", "")
+                    tool_use_id = block.get("tool_use_id", "")
+
+                    # Check if this is a permission denial
+                    if is_error and "requires approval" in content.lower():
+                        log.debug("Permission denial detected for tool_use_id: {}", tool_use_id)
+
+                        # Look up the tool details from tracked tool_uses
+                        if tool_use_id in self._pending_tool_uses:
+                            tool_name, tool_input = self._pending_tool_uses[tool_use_id]
+                            log.debug("Found tool details: {} {}", tool_name, tool_input)
+
+                            # Emit permission_requested signal
+                            self.permission_requested.emit(
+                                tool_use_id,  # Use tool_use_id as request_id
+                                tool_name,
+                                tool_input,
+                            )
+                        else:
+                            log.warning("Tool_use_id {} not found in pending tool_uses", tool_use_id)
 
     def _parse_final_output(self) -> None:
         """Parse the final complete output."""
@@ -338,6 +444,7 @@ class ClaudeRunner(QObject):
     def write_stdin(self, data: str) -> None:
         """Write data to the process stdin (for interactive mode)."""
         if self._process and self.is_running:
+            log.debug("Writing to Claude CLI stdin: {}", data)
             self._process.write(data.encode("utf-8"))
 
     def respond_permission(self, accept: bool) -> None:
@@ -349,6 +456,7 @@ class ClaudeRunner(QObject):
         if self._process and self.is_running:
             # Send 'y' for accept, 'n' for reject followed by newline
             response = "y\n" if accept else "n\n"
+            log.debug("Responding to permission request: {}", response.strip())
             self._process.write(response.encode("utf-8"))
 
 

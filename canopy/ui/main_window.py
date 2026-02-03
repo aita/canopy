@@ -3,10 +3,10 @@
 from pathlib import Path
 from uuid import UUID
 
+import logbook
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -24,6 +24,8 @@ from canopy.models.session import Session, SessionStatus
 from .dialogs import PermissionDialog
 from .session_panel import SessionPanel
 from .session_tabs import SessionTabWidget
+
+log = logbook.Logger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -148,6 +150,7 @@ class MainWindow(QMainWindow):
         self._session_tabs.session_closed.connect(self._on_session_closed)
         self._session_tabs.message_submitted.connect(self._on_message_submitted)
         self._session_tabs.cancel_requested.connect(self._on_cancel_requested)
+        self._session_tabs.permission_response.connect(self._on_permission_response)
 
         # Session manager signals
         self._session_manager.session_created.connect(self._on_session_created)
@@ -460,32 +463,26 @@ class MainWindow(QMainWindow):
     def _on_permission_requested(
         self, session: Session, request_id: str, tool_name: str, tool_input: dict
     ) -> None:
-        """Handle permission request from Claude CLI."""
-        # Close any existing permission dialog first
-        if self._permission_dialog is not None:
-            self._permission_dialog.close()
-            self._permission_dialog.deleteLater()
-            self._permission_dialog = None
+        """Handle permission request from Claude CLI.
 
-        dialog = PermissionDialog(tool_name, tool_input, self)
-        self._permission_dialog = dialog
+        Permission requests are now handled inline in the chat view with
+        Accept/Reject buttons, so we don't show a dialog anymore.
+        The buttons emit permission_response signal which is handled by
+        _on_permission_response.
+        """
+        # Inline buttons are shown in the chat view via SessionTabWidget
+        # No dialog needed - the user will click Accept/Reject in the chat
+        pass
 
-        # Use non-blocking dialog to avoid freezing the UI
-        # Connect to response signal to handle the result asynchronously
-        def handle_response(response: str) -> None:
-            accept = response in (PermissionDialog.ACCEPT, PermissionDialog.ACCEPT_ALWAYS)
-            self._session_manager.respond_permission(session.id, accept)
-            self._permission_dialog = None
-            dialog.deleteLater()
-
-        dialog.response_given.connect(handle_response)
-        # Use WindowModal to keep dialog modal but allow event processing
-        # This prevents UI freeze while still blocking input to parent
-        dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        dialog.show()
-        # Ensure dialog stays on top and gets focus
-        dialog.raise_()
-        dialog.activateWindow()
+    def _on_permission_response(
+        self, session_id: UUID, request_id: str, accepted: bool
+    ) -> None:
+        """Handle permission response from inline chat buttons."""
+        log.debug(
+            "Permission response: session={}, request_id={}, accepted={}",
+            session_id, request_id, accepted
+        )
+        self._session_manager.respond_permission(session_id, accepted)
 
     def _refresh_session_diff(self, session_id) -> None:
         """Refresh the diff view for a session (no-op, diff viewer removed)."""

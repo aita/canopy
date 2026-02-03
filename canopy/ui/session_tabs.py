@@ -26,6 +26,7 @@ class SessionTab(QWidget):
 
     message_submitted = Signal(str, list, str)  # message, file_references, model
     cancel_requested = Signal()
+    permission_response = Signal(str, bool)  # request_id, accepted
 
     def __init__(
         self,
@@ -90,6 +91,14 @@ class SessionTab(QWidget):
         self._message_input.message_submitted.connect(self._on_message_submitted)
         self._message_input.cancel_requested.connect(self.cancel_requested.emit)
         self._message_input.attach_files_requested.connect(self.toggle_file_references)
+
+        # Connect permission signals from chat view
+        self._chat_view.permission_accepted.connect(
+            lambda req_id: self.permission_response.emit(req_id, True)
+        )
+        self._chat_view.permission_rejected.connect(
+            lambda req_id: self.permission_response.emit(req_id, False)
+        )
 
     def _on_message_submitted(self, message: str, model: str) -> None:
         """Handle message submission with file references and model."""
@@ -166,12 +175,21 @@ class SessionTab(QWidget):
             self._chat_view.finish_streaming()
 
     def add_tool_use(self, tool_name: str, tool_input: dict) -> None:
-        """Add a tool use entry (no-op, command log removed)."""
-        pass
+        """Add a tool use entry with thinking indicator."""
+        if self._is_streaming:
+            self._chat_view.show_tool_use(tool_name, tool_input)
 
     def add_tool_result(self, tool_name: str, result: str) -> None:
-        """Add a tool result (no-op, command log removed)."""
-        pass
+        """Add a tool result to the streaming view."""
+        if self._is_streaming:
+            self._chat_view.show_tool_result(tool_name, result)
+
+    def show_permission_request(
+        self, request_id: str, tool_name: str, tool_input: dict
+    ) -> None:
+        """Show permission request in chat view."""
+        if self._is_streaming:
+            self._chat_view.show_permission_request(request_id, tool_name, tool_input)
 
     def toggle_file_references(self) -> None:
         """Toggle file references panel visibility."""
@@ -194,6 +212,7 @@ class SessionTabWidget(QTabWidget):
     session_closed = Signal(UUID)
     message_submitted = Signal(UUID, str, list, str)  # session_id, message, file_refs, model
     cancel_requested = Signal(UUID)
+    permission_response = Signal(UUID, str, bool)  # session_id, request_id, accepted
 
     def __init__(
         self,
@@ -256,6 +275,7 @@ class SessionTabWidget(QTabWidget):
         self._session_manager.streaming_text.connect(self._on_streaming_text)
         self._session_manager.tool_use_started.connect(self._on_tool_use)
         self._session_manager.tool_result_received.connect(self._on_tool_result)
+        self._session_manager.permission_requested.connect(self._on_permission_requested)
 
     def add_session(self, session: Session) -> SessionTab:
         """Add a session tab."""
@@ -272,6 +292,9 @@ class SessionTabWidget(QTabWidget):
         )
         tab.cancel_requested.connect(
             lambda: self.cancel_requested.emit(session.id)
+        )
+        tab.permission_response.connect(
+            lambda req_id, accepted: self.permission_response.emit(session.id, req_id, accepted)
         )
 
         self._tabs[session.id] = tab
@@ -355,6 +378,14 @@ class SessionTabWidget(QTabWidget):
         tab = self._tabs.get(session.id)
         if tab:
             tab.add_tool_result(tool_name, result)
+
+    def _on_permission_requested(
+        self, session: Session, request_id: str, tool_name: str, tool_input: dict
+    ) -> None:
+        """Handle permission request from Claude CLI."""
+        tab = self._tabs.get(session.id)
+        if tab:
+            tab.show_permission_request(request_id, tool_name, tool_input)
 
     def get_tab(self, session_id: UUID) -> SessionTab | None:
         """Get a session tab by ID."""
