@@ -155,10 +155,11 @@ class ClaudeRunner(QObject):
         # Build command arguments
         # Note: Working directory is set via setWorkingDirectory()
         # Use --permission-mode default to avoid interactive prompts
+        # --print is a boolean flag, message is passed as positional argument
         args = [
             "--output-format", output_format,
             "--permission-mode", "default",
-            "--print", message,
+            "--print",
         ]
 
         # stream-json with --print requires --verbose
@@ -174,6 +175,9 @@ class ClaudeRunner(QObject):
 
         if model:
             args.extend(["--model", model])
+
+        # Message is passed as positional argument at the end
+        args.append(message)
 
         self._start_process(args)
 
