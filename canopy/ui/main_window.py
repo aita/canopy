@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -21,6 +22,7 @@ from canopy.models.config import AppConfig
 from canopy.models.repository import Repository
 from canopy.models.session import Session, SessionStatus
 
+from .dialogs import PermissionDialog
 from .session_panel import SessionPanel
 from .session_tabs import SessionTabWidget
 
@@ -30,6 +32,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, repo_path: Path | None = None) -> None:
         super().__init__()
+        self._repo_path = repo_path
 
         # Load configuration
         self._config = AppConfig.load()
@@ -42,7 +45,6 @@ class MainWindow(QMainWindow):
         )
 
         # Repository data - single repository from current directory
-        self._repo_path = repo_path
         self._repository: Repository | None = None
 
         # Track pending worktree operations (worktree_path -> repo_path)
@@ -151,6 +153,9 @@ class MainWindow(QMainWindow):
 
         # Connect tool result signal to refresh diffs
         self._session_manager.tool_result_received.connect(self._on_tool_result)
+
+        # Connect permission request signal
+        self._session_manager.permission_requested.connect(self._on_permission_requested)
 
         # Git service signals for async operations
         self._git_service.worktree_creation_started.connect(
@@ -406,10 +411,10 @@ class MainWindow(QMainWindow):
         self._session_tabs.remove_session(session_id)
 
     def _on_message_submitted(
-        self, session_id: UUID, message: str, file_refs: list[str] = None
+        self, session_id: UUID, message: str, file_refs: list[str] = None, model: str = None
     ) -> None:
         """Handle message submitted from session tab."""
-        self._session_manager.send_message(session_id, message, file_refs or [])
+        self._session_manager.send_message(session_id, message, file_refs or [], model)
 
     def _on_cancel_requested(self, session_id: UUID) -> None:
         """Handle cancel request from session tab."""
@@ -429,6 +434,21 @@ class MainWindow(QMainWindow):
         # Refresh diff view when file operations complete
         if tool_name in ("Write", "Edit", "Bash"):
             self._refresh_session_diff(session.id)
+
+    def _on_permission_requested(
+        self, session: Session, request_id: str, tool_name: str, tool_input: dict
+    ) -> None:
+        """Handle permission request from Claude CLI."""
+        dialog = PermissionDialog(tool_name, tool_input, self)
+        result = dialog.exec()
+
+        # Respond to the permission request
+        if result == QDialog.DialogCode.Accepted:
+            response = dialog.get_response()
+            accept = response in (PermissionDialog.ACCEPT, PermissionDialog.ACCEPT_ALWAYS)
+            self._session_manager.respond_permission(session.id, accept)
+        else:
+            self._session_manager.respond_permission(session.id, False)
 
     def _refresh_session_diff(self, session_id) -> None:
         """Refresh the diff view for a session (no-op, diff viewer removed)."""

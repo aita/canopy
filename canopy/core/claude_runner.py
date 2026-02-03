@@ -12,7 +12,7 @@ from PySide6.QtCore import QObject, QProcess, Signal
 class StreamEvent:
     """Represents a stream-json event from Claude CLI."""
 
-    type: str  # init, user_input, assistant, tool_use, tool_result, result, error
+    type: str  # init, user_input, assistant, tool_use, tool_result, result, error, permission_request
     message: dict | None = None
     tool_name: str | None = None
     tool_input: dict | None = None
@@ -21,6 +21,7 @@ class StreamEvent:
     session_id: str | None = None
     cost_usd: float | None = None
     duration_ms: int | None = None
+    permission_request_id: str | None = None
 
     @classmethod
     def from_json(cls, data: dict) -> "StreamEvent":
@@ -59,6 +60,12 @@ class StreamEvent:
                 event.content = result.get("text", "")
         elif event.type == "error":
             event.content = data.get("error", {}).get("message", str(data))
+        elif event.type == "permission_request":
+            # Permission request from CLI
+            tool_info = data.get("tool", {})
+            event.tool_name = tool_info.get("name")
+            event.tool_input = tool_info.get("input")
+            event.permission_request_id = data.get("request_id")
 
         return event
 
@@ -79,6 +86,7 @@ class ClaudeRunner(QObject):
     assistant_text = Signal(str)  # Incremental assistant text
     tool_use_started = Signal(str, dict)  # tool_name, tool_input
     tool_result_received = Signal(str, str)  # tool_name, result
+    permission_requested = Signal(str, str, dict)  # request_id, tool_name, tool_input
 
     def __init__(
         self,
@@ -117,6 +125,7 @@ class ClaudeRunner(QObject):
         output_format: str = "stream-json",
         resume_session: str | None = None,
         allowed_tools: list[str] | None = None,
+        model: str | None = None,
     ) -> None:
         """Send a message to Claude Code.
 
@@ -126,6 +135,7 @@ class ClaudeRunner(QObject):
             output_format: Output format (json, text, stream-json)
             resume_session: Session ID to resume (optional)
             allowed_tools: List of allowed tools (optional)
+            model: Model ID to use (optional)
         """
         if self.is_running:
             self.error_occurred.emit("A command is already running")
@@ -157,6 +167,9 @@ class ClaudeRunner(QObject):
             for tool in allowed_tools:
                 args.extend(["--allowedTools", tool])
 
+        if model:
+            args.extend(["--model", model])
+
         self._start_process(args)
 
     def _start_process(self, args: list[str]) -> None:
@@ -175,8 +188,7 @@ class ClaudeRunner(QObject):
         self._process.errorOccurred.connect(self._on_error)
 
         self._process.start()
-        # Close stdin to prevent interactive prompts from blocking
-        self._process.closeWriteChannel()
+        # Note: We do NOT close stdin to allow responding to permission requests
         self.process_started.emit()
 
     def _on_stdout(self) -> None:
@@ -251,6 +263,12 @@ class ClaudeRunner(QObject):
                         self.tool_use_started.emit(event.tool_name, event.tool_input or {})
                     elif event.type == "tool_result" and event.tool_name:
                         self.tool_result_received.emit(event.tool_name, event.tool_result or "")
+                    elif event.type == "permission_request" and event.tool_name:
+                        self.permission_requested.emit(
+                            event.permission_request_id or "",
+                            event.tool_name,
+                            event.tool_input or {},
+                        )
 
             except json.JSONDecodeError:
                 # Not JSON, emit as raw text
@@ -307,6 +325,17 @@ class ClaudeRunner(QObject):
         """Write data to the process stdin (for interactive mode)."""
         if self._process and self.is_running:
             self._process.write(data.encode("utf-8"))
+
+    def respond_permission(self, accept: bool) -> None:
+        """Respond to a permission request.
+
+        Args:
+            accept: True to accept, False to reject
+        """
+        if self._process and self.is_running:
+            # Send 'y' for accept, 'n' for reject followed by newline
+            response = "y\n" if accept else "n\n"
+            self._process.write(response.encode("utf-8"))
 
 
 class ClaudeResponse:

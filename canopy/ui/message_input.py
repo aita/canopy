@@ -3,14 +3,25 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent, QFont
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+# Available Claude models
+CLAUDE_MODELS = [
+    ("claude-sonnet-4-20250514", "Claude Sonnet 4"),
+    ("claude-opus-4-20250514", "Claude Opus 4"),
+    ("claude-3-5-haiku-20241022", "Claude 3.5 Haiku"),
+]
+
+DEFAULT_MODEL = "claude-sonnet-4-20250514"
 
 
 class MessageTextEdit(QTextEdit):
@@ -29,8 +40,9 @@ class MessageTextEdit(QTextEdit):
 class MessageInput(QWidget):
     """Widget for inputting and sending messages - VSCode extension style."""
 
-    message_submitted = Signal(str)
+    message_submitted = Signal(str, str)  # message, model
     cancel_requested = Signal()
+    attach_files_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -84,17 +96,77 @@ class MessageInput(QWidget):
         button_row = QHBoxLayout()
         button_row.setSpacing(8)
 
-        # Hint text
-        hint_label = QWidget()
-        hint_layout = QHBoxLayout(hint_label)
-        hint_layout.setContentsMargins(0, 0, 0, 0)
-        from PySide6.QtWidgets import QLabel
-        hint = QLabel("Enter to send, Shift+Enter for newline")
-        hint.setStyleSheet("color: #6b7280; font-size: 10px;")
-        hint_layout.addWidget(hint)
-        button_row.addWidget(hint_label)
+        # Model selector
+        model_label = QLabel("Model:")
+        model_label.setStyleSheet("color: #9ca3af; font-size: 11px;")
+        button_row.addWidget(model_label)
+
+        self._model_combo = QComboBox()
+        self._model_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #2d2d2d;
+                color: #e5e7eb;
+                border: 1px solid #4a4a4a;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+                min-width: 120px;
+            }
+            QComboBox:hover {
+                border-color: #6b7280;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #9ca3af;
+                margin-right: 5px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2d2d2d;
+                color: #e5e7eb;
+                selection-background-color: #d97706;
+                border: 1px solid #4a4a4a;
+            }
+        """)
+        for model_id, model_name in CLAUDE_MODELS:
+            self._model_combo.addItem(model_name, model_id)
+        button_row.addWidget(self._model_combo)
+
+        # Attach files button
+        self._attach_btn = QPushButton("@")
+        self._attach_btn.setToolTip("Attach files")
+        self._attach_btn.setFixedSize(28, 28)
+        self._attach_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #9ca3af;
+                border: 1px solid #4a4a4a;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+                color: #e5e7eb;
+                border-color: #6b7280;
+            }
+            QPushButton:pressed {
+                background-color: #4d4d4d;
+            }
+        """)
+        button_row.addWidget(self._attach_btn)
 
         button_row.addStretch()
+
+        # Hint text
+        hint = QLabel("Enter to send, Shift+Enter for newline")
+        hint.setStyleSheet("color: #6b7280; font-size: 10px;")
+        button_row.addWidget(hint)
 
         # Cancel button (hidden by default)
         self._cancel_btn = QPushButton("Cancel")
@@ -149,6 +221,7 @@ class MessageInput(QWidget):
         self._text_edit.submit_requested.connect(self._on_submit)
         self._send_btn.clicked.connect(self._on_submit)
         self._cancel_btn.clicked.connect(self._on_cancel)
+        self._attach_btn.clicked.connect(self.attach_files_requested.emit)
 
     def _on_submit(self) -> None:
         """Handle submit action."""
@@ -157,7 +230,8 @@ class MessageInput(QWidget):
 
         text = self._text_edit.toPlainText().strip()
         if text:
-            self.message_submitted.emit(text)
+            model = self._model_combo.currentData()
+            self.message_submitted.emit(text, model)
             self._text_edit.clear()
 
     def _on_cancel(self) -> None:
@@ -171,6 +245,8 @@ class MessageInput(QWidget):
         self._send_btn.setEnabled(not processing)
         self._send_btn.setVisible(not processing)
         self._cancel_btn.setVisible(processing)
+        self._model_combo.setEnabled(not processing)
+        self._attach_btn.setEnabled(not processing)
 
         if processing:
             self._text_edit.setPlaceholderText("Claude is thinking...")
@@ -181,6 +257,8 @@ class MessageInput(QWidget):
         """Enable or disable the input."""
         self._text_edit.setEnabled(enabled)
         self._send_btn.setEnabled(enabled)
+        self._model_combo.setEnabled(enabled)
+        self._attach_btn.setEnabled(enabled)
 
         if not enabled:
             self._text_edit.setPlaceholderText("Select a session to start chatting")
@@ -198,3 +276,13 @@ class MessageInput(QWidget):
     def set_text(self, text: str) -> None:
         """Set the text."""
         self._text_edit.setPlainText(text)
+
+    def get_model(self) -> str:
+        """Get the currently selected model ID."""
+        return self._model_combo.currentData()
+
+    def set_model(self, model_id: str) -> None:
+        """Set the selected model by ID."""
+        index = self._model_combo.findData(model_id)
+        if index >= 0:
+            self._model_combo.setCurrentIndex(index)

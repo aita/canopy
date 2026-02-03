@@ -27,6 +27,7 @@ class SessionManager(QObject):
     streaming_text = Signal(Session, str)  # Incremental text
     tool_use_started = Signal(Session, str, dict)  # tool_name, input
     tool_result_received = Signal(Session, str, str)  # tool_name, result
+    permission_requested = Signal(Session, str, str, dict)  # request_id, tool_name, input
 
     def __init__(
         self,
@@ -107,6 +108,7 @@ class SessionManager(QObject):
         session_id: UUID,
         message: str,
         file_references: list[str] | None = None,
+        model: str | None = None,
     ) -> None:
         """Send a message to a session.
 
@@ -114,6 +116,7 @@ class SessionManager(QObject):
             session_id: The session ID
             message: The message to send
             file_references: Optional list of file references to include
+            model: Model ID to use (optional)
         """
         session = self._sessions.get(session_id)
         if not session:
@@ -146,6 +149,7 @@ class SessionManager(QObject):
             cwd=session.worktree_path,
             output_format="stream-json",
             resume_session=session.claude_session_id,
+            model=model,
         )
 
     def cancel_request(self, session_id: UUID) -> None:
@@ -185,6 +189,9 @@ class SessionManager(QObject):
         runner.tool_result_received.connect(
             lambda name, result: self._on_tool_result(session.id, name, result)
         )
+        runner.permission_requested.connect(
+            lambda req_id, name, inp: self._on_permission_request(session.id, req_id, name, inp)
+        )
 
         self._runners[session.id] = runner
         return runner
@@ -216,6 +223,25 @@ class SessionManager(QObject):
         session = self._sessions.get(session_id)
         if session:
             self.tool_result_received.emit(session, tool_name, result)
+
+    def _on_permission_request(
+        self, session_id: UUID, request_id: str, tool_name: str, tool_input: dict
+    ) -> None:
+        """Handle permission request event."""
+        session = self._sessions.get(session_id)
+        if session:
+            self.permission_requested.emit(session, request_id, tool_name, tool_input)
+
+    def respond_permission(self, session_id: UUID, accept: bool) -> None:
+        """Respond to a permission request.
+
+        Args:
+            session_id: The session ID
+            accept: True to accept, False to reject
+        """
+        runner = self._runners.get(session_id)
+        if runner:
+            runner.respond_permission(accept)
 
     def _on_response(self, session_id: UUID, response: dict) -> None:
         """Handle a response from Claude."""
