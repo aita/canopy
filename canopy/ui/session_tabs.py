@@ -24,7 +24,7 @@ from .message_input import MessageInput
 class SessionTab(QWidget):
     """A single session tab containing chat view and message input."""
 
-    message_submitted = Signal(str, list)  # message, file_references
+    message_submitted = Signal(str, list, str)  # message, file_references, model
     cancel_requested = Signal()
 
     def __init__(
@@ -89,11 +89,12 @@ class SessionTab(QWidget):
         """Connect signals."""
         self._message_input.message_submitted.connect(self._on_message_submitted)
         self._message_input.cancel_requested.connect(self.cancel_requested.emit)
+        self._message_input.attach_files_requested.connect(self.toggle_file_references)
 
-    def _on_message_submitted(self, message: str) -> None:
-        """Handle message submission with file references."""
+    def _on_message_submitted(self, message: str, model: str) -> None:
+        """Handle message submission with file references and model."""
         refs = self._file_reference_panel.get_references()
-        self.message_submitted.emit(message, refs)
+        self.message_submitted.emit(message, refs, model)
 
     def _load_messages(self) -> None:
         """Load existing messages into the chat view."""
@@ -191,7 +192,7 @@ class SessionTabWidget(QTabWidget):
     """Tab widget for managing multiple sessions."""
 
     session_closed = Signal(UUID)
-    message_submitted = Signal(UUID, str, list)  # session_id, message, file_refs
+    message_submitted = Signal(UUID, str, list, str)  # session_id, message, file_refs, model
     cancel_requested = Signal(UUID)
 
     def __init__(
@@ -267,7 +268,7 @@ class SessionTabWidget(QTabWidget):
         # Create new tab
         tab = SessionTab(session)
         tab.message_submitted.connect(
-            lambda msg, refs: self.message_submitted.emit(session.id, msg, refs)
+            lambda msg, refs, model: self.message_submitted.emit(session.id, msg, refs, model)
         )
         tab.cancel_requested.connect(
             lambda: self.cancel_requested.emit(session.id)

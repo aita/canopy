@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Main entry point for Canopy application."""
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -18,8 +19,26 @@ def load_stylesheet() -> str:
     return ""
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        prog="canopy-gui",
+        description="Claude Code Worktree IDE",
+    )
+    parser.add_argument(
+        "repository",
+        nargs="?",
+        type=Path,
+        default=Path.cwd(),
+        help="Path to a Git repository (defaults to current directory)",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
     """Main entry point."""
+    args = parse_args()
+
     # Enable high DPI scaling
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
@@ -35,11 +54,8 @@ def main() -> int:
     # if stylesheet:
     #     app.setStyleSheet(stylesheet)
 
-    # Get the current working directory as the repository path
-    repo_path = Path.cwd()
-
     # Create and show main window with the repository path
-    window = MainWindow(repo_path=repo_path)
+    window = MainWindow(repo_path=args.repository)
     window.show()
 
     return app.exec()
