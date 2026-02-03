@@ -104,16 +104,15 @@ class MessageInput(QWidget):
         self._model_combo = QComboBox()
         self._model_combo.setStyleSheet("""
             QComboBox {
-                background-color: #2d2d2d;
+                background-color: transparent;
                 color: #e5e7eb;
-                border: 1px solid #4a4a4a;
-                border-radius: 4px;
+                border: none;
                 padding: 4px 8px;
                 font-size: 11px;
                 min-width: 120px;
             }
             QComboBox:hover {
-                border-color: #6b7280;
+                color: #ffffff;
             }
             QComboBox::drop-down {
                 border: none;
@@ -143,20 +142,17 @@ class MessageInput(QWidget):
         self._attach_btn.setFixedSize(28, 28)
         self._attach_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2d2d2d;
+                background-color: transparent;
                 color: #9ca3af;
-                border: 1px solid #4a4a4a;
-                border-radius: 4px;
+                border: none;
                 font-size: 14px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #3d3d3d;
                 color: #e5e7eb;
-                border-color: #6b7280;
             }
             QPushButton:pressed {
-                background-color: #4d4d4d;
+                color: #ffffff;
             }
         """)
         button_row.addWidget(self._attach_btn)
