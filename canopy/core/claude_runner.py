@@ -32,16 +32,34 @@ class StreamEvent:
         event = cls(type=data.get("type", "unknown"))
         event.session_id = data.get("session_id")
 
-        if event.type == "init":
+        # Handle system events (type: system, subtype: init)
+        if event.type == "system":
+            subtype = data.get("subtype", "")
+            if subtype == "init":
+                event.type = "init"  # Normalize to "init" for easier handling
+            event.session_id = data.get("session_id")
+            event.message = data
+        elif event.type == "init":
             event.session_id = data.get("session_id")
             event.message = data.get("message")
-        elif event.type in ("assistant", "user_input"):
+        elif event.type in ("assistant", "user", "user_input"):
             event.message = data.get("message", {})
             content_blocks = event.message.get("content", [])
             texts = []
             for block in content_blocks:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    texts.append(block.get("text", ""))
+                if isinstance(block, dict):
+                    block_type = block.get("type")
+                    if block_type == "text":
+                        texts.append(block.get("text", ""))
+                    elif block_type == "tool_use":
+                        # Extract tool_use info from assistant message
+                        event.tool_name = block.get("name")
+                        event.tool_input = block.get("input")
+                    elif block_type == "tool_result":
+                        # Extract tool_result from user message
+                        content = block.get("content", "")
+                        if content:
+                            texts.append(content)
                 elif isinstance(block, str):
                     texts.append(block)
             event.content = "\n".join(texts)
@@ -53,7 +71,7 @@ class StreamEvent:
             event.tool_result = data.get("tool", {}).get("result")
         elif event.type == "result":
             event.session_id = data.get("session_id")
-            event.cost_usd = data.get("cost_usd")
+            event.cost_usd = data.get("total_cost_usd") or data.get("cost_usd")
             event.duration_ms = data.get("duration_ms")
             # Result content
             result = data.get("result", "")
@@ -283,8 +301,12 @@ class ClaudeRunner(QObject):
                     self.stream_event.emit(event)
 
                     # Emit specific signals based on event type
-                    if event.type == "assistant" and event.content:
-                        self.assistant_text.emit(event.content)
+                    if event.type == "assistant":
+                        if event.content:
+                            self.assistant_text.emit(event.content)
+                        # Assistant message may contain tool_use
+                        if event.tool_name:
+                            self.tool_use_started.emit(event.tool_name, event.tool_input or {})
                     elif event.type == "tool_use" and event.tool_name:
                         self.tool_use_started.emit(event.tool_name, event.tool_input or {})
                     elif event.type == "tool_result" and event.tool_name:
