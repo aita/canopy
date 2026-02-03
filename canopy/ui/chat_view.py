@@ -3,7 +3,7 @@
 from io import StringIO
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -17,6 +17,231 @@ from PySide6.QtWidgets import (
 )
 
 from canopy.models.session import Message, MessageRole
+
+
+class InlineDiffHighlighter(QSyntaxHighlighter):
+    """Syntax highlighter for inline diff content."""
+
+    def __init__(self, parent: QTextDocument) -> None:
+        super().__init__(parent)
+
+        # Format for added lines
+        self._add_format = QTextCharFormat()
+        self._add_format.setBackground(QColor("#1e3a29"))
+        self._add_format.setForeground(QColor("#4ade80"))
+
+        # Format for deleted lines
+        self._del_format = QTextCharFormat()
+        self._del_format.setBackground(QColor("#3f1d1d"))
+        self._del_format.setForeground(QColor("#f87171"))
+
+        # Format for hunk headers
+        self._hunk_format = QTextCharFormat()
+        self._hunk_format.setForeground(QColor("#60a5fa"))
+
+        # Format for file headers
+        self._header_format = QTextCharFormat()
+        self._header_format.setForeground(QColor("#9ca3af"))
+
+    def highlightBlock(self, text: str) -> None:
+        """Highlight a block of text."""
+        if text.startswith("+") and not text.startswith("+++"):
+            self.setFormat(0, len(text), self._add_format)
+        elif text.startswith("-") and not text.startswith("---"):
+            self.setFormat(0, len(text), self._del_format)
+        elif text.startswith("@@"):
+            self.setFormat(0, len(text), self._hunk_format)
+        elif text.startswith("---") or text.startswith("+++"):
+            self.setFormat(0, len(text), self._header_format)
+
+
+class InlineDiffPreviewWidget(QFrame):
+    """Inline diff preview widget with collapsible view."""
+
+    # Default number of lines to show when collapsed
+    DEFAULT_COLLAPSED_LINES = 8
+
+    def __init__(
+        self,
+        file_path: str,
+        old_string: str,
+        new_string: str,
+        tool_name: str = "Edit",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._file_path = file_path
+        self._old_string = old_string
+        self._new_string = new_string
+        self._tool_name = tool_name
+        self._diff_lines: list[str] = []
+        self._is_expanded = False
+        self._collapsed_lines = self.DEFAULT_COLLAPSED_LINES
+        self._setup_ui()
+        self._generate_diff()
+
+    def _setup_ui(self) -> None:
+        """Set up the UI."""
+        self.setFrameStyle(QFrame.Shape.NoFrame)
+        self.setStyleSheet("""
+            InlineDiffPreviewWidget {
+                background-color: #252525;
+                border: 1px solid #3a3a3a;
+                border-radius: 6px;
+                margin: 4px 16px 4px 56px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header with file path
+        self._header = QFrame()
+        self._header.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                border-bottom: 1px solid #3a3a3a;
+            }
+        """)
+        header_layout = QHBoxLayout(self._header)
+        header_layout.setContentsMargins(12, 8, 12, 8)
+        header_layout.setSpacing(8)
+
+        # Tool icon based on operation
+        icon = "✏️" if self._tool_name == "Edit" else "📝"
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet("font-size: 12px;")
+        header_layout.addWidget(icon_label)
+
+        # File path
+        path_label = QLabel(self._file_path)
+        path_label.setStyleSheet("""
+            color: #e5e5e5;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+        """)
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        header_layout.addWidget(path_label)
+
+        header_layout.addStretch()
+
+        layout.addWidget(self._header)
+
+        # Diff content area
+        self._diff_text = QTextEdit()
+        self._diff_text.setReadOnly(True)
+        self._diff_text.setFrameStyle(QFrame.Shape.NoFrame)
+        self._diff_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._diff_text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._diff_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                padding: 8px;
+            }
+        """)
+
+        # Monospace font
+        font = QFont("JetBrains Mono", 11)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        self._diff_text.setFont(font)
+
+        # Apply highlighter
+        self._highlighter = InlineDiffHighlighter(self._diff_text.document())
+
+        layout.addWidget(self._diff_text)
+
+        # Expand button (shown when collapsed and more lines available)
+        self._expand_button = QPushButton()
+        self._expand_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #60a5fa;
+                border: none;
+                border-bottom-left-radius: 6px;
+                border-bottom-right-radius: 6px;
+                padding: 6px 12px;
+                font-size: 11px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #3a3a3a;
+                color: #93c5fd;
+            }
+        """)
+        self._expand_button.clicked.connect(self._toggle_expand)
+        self._expand_button.setVisible(False)
+        layout.addWidget(self._expand_button)
+
+    def _generate_diff(self) -> None:
+        """Generate unified diff from old and new strings."""
+        import difflib
+
+        old_lines = self._old_string.splitlines(keepends=True)
+        new_lines = self._new_string.splitlines(keepends=True)
+
+        # Ensure lines end with newline for diff formatting
+        if old_lines and not old_lines[-1].endswith('\n'):
+            old_lines[-1] += '\n'
+        if new_lines and not new_lines[-1].endswith('\n'):
+            new_lines[-1] += '\n'
+
+        diff = difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile="original",
+            tofile="modified",
+            lineterm=""
+        )
+
+        self._diff_lines = [line.rstrip('\n') for line in diff]
+        self._update_display()
+
+    def _update_display(self) -> None:
+        """Update the diff display based on collapsed/expanded state."""
+        if not self._diff_lines:
+            self._diff_text.setPlainText("No changes")
+            self._expand_button.setVisible(False)
+            self._update_height()
+            return
+
+        total_lines = len(self._diff_lines)
+
+        if self._is_expanded or total_lines <= self._collapsed_lines:
+            # Show all lines
+            display_lines = self._diff_lines
+            self._expand_button.setVisible(False)
+        else:
+            # Show collapsed view
+            display_lines = self._diff_lines[:self._collapsed_lines]
+            remaining = total_lines - self._collapsed_lines
+            self._expand_button.setText(f"▼ Show full diff ({remaining} more lines)")
+            self._expand_button.setVisible(True)
+
+        self._diff_text.setPlainText('\n'.join(display_lines))
+        self._update_height()
+
+    def _update_height(self) -> None:
+        """Update height based on content."""
+        doc = self._diff_text.document()
+        doc.setDocumentMargin(8)
+        # Calculate height based on line count
+        line_height = self._diff_text.fontMetrics().lineSpacing()
+        visible_lines = self._diff_text.toPlainText().count('\n') + 1
+        content_height = line_height * visible_lines + 24  # Add padding
+        # Cap at reasonable max height
+        max_height = 400 if self._is_expanded else 200
+        self._diff_text.setFixedHeight(min(content_height, max_height))
+
+    def _toggle_expand(self) -> None:
+        """Toggle between collapsed and expanded view."""
+        self._is_expanded = not self._is_expanded
+        if self._is_expanded:
+            self._expand_button.setText("▲ Collapse diff")
+        self._update_display()
 
 
 class MessageWidget(QFrame):
@@ -220,6 +445,8 @@ class StreamingChatView(QWidget):
         self._streaming_widget: StreamingMessageWidget | None = None
         # Store pending permission request to show after streaming finishes
         self._pending_permission: dict | None = None
+        # Store pending edit operation to show diff preview
+        self._pending_edit: dict | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -282,6 +509,7 @@ class StreamingChatView(QWidget):
         self._streaming_buffer = StringIO()
         self._is_streaming = False
         self._pending_permission = None
+        self._pending_edit = None
         self._hide_thinking_indicator()
         self._remove_permission_widget()
 
@@ -360,6 +588,15 @@ class StreamingChatView(QWidget):
         if not self._is_streaming:
             return
 
+        # Store edit operation for diff preview
+        if tool_name == "Edit":
+            self._pending_edit = {
+                "tool_name": tool_name,
+                "file_path": tool_input.get("file_path", ""),
+                "old_string": tool_input.get("old_string", ""),
+                "new_string": tool_input.get("new_string", ""),
+            }
+
         # Format tool description for the thinking indicator
         if tool_name == "Bash":
             cmd = tool_input.get("command", "")
@@ -387,10 +624,28 @@ class StreamingChatView(QWidget):
         self._scroll_to_bottom()
 
     def show_tool_result(self, tool_name: str, result: str) -> None:
-        """Show tool result - thinking indicator continues to show progress."""
-        # Tool results are not shown in the message content
-        # The thinking indicator already shows what tool was used
-        pass
+        """Show tool result - show diff preview for Edit operations."""
+        if not self._is_streaming:
+            return
+
+        # Show diff preview for Edit operations
+        if tool_name == "Edit" and self._pending_edit:
+            edit_info = self._pending_edit
+            self._pending_edit = None
+
+            # Create diff preview widget
+            diff_widget = InlineDiffPreviewWidget(
+                file_path=edit_info["file_path"],
+                old_string=edit_info["old_string"],
+                new_string=edit_info["new_string"],
+                tool_name=edit_info["tool_name"],
+            )
+
+            # Insert before thinking indicator
+            self._container_layout.insertWidget(
+                self._container_layout.count() - 2, diff_widget
+            )
+            self._scroll_to_bottom()
 
     def show_permission_request(
         self, request_id: str, tool_name: str, tool_input: dict
