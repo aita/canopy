@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from canopy.core.session_manager import SessionManager
-from canopy.models.session import Message, Session, SessionStatus
+from canopy.models.session import Message, MessageRole, Session, SessionStatus
 
 from .chat_view import StreamingChatView
 from .file_reference import FileReferencePanel
@@ -314,6 +314,10 @@ class SessionTabWidget(QTabWidget):
         """Handle message received from session manager."""
         tab = self._tabs.get(session.id)
         if tab:
+            # Skip assistant messages while streaming, as the streaming widget
+            # already displays the content
+            if message.role == MessageRole.ASSISTANT and session.id in self._streaming_sessions:
+                return
             tab.add_message(message)
 
     def _on_status_changed(self, session: Session, status: SessionStatus) -> None:
