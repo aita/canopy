@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 from canopy.models.repository import Repository, Worktree
 
@@ -19,8 +19,8 @@ class GitService(QObject):
     """Service for Git operations including worktree management."""
 
     # Signals
-    worktrees_changed = pyqtSignal(Repository)
-    error_occurred = pyqtSignal(str)
+    worktrees_changed = Signal(Repository)
+    error_occurred = Signal(str)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)

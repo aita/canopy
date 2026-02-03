@@ -3,8 +3,8 @@
 from typing import Optional
 from uuid import UUID
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -23,8 +23,8 @@ from .message_input import MessageInput
 class SessionTab(QWidget):
     """A single session tab containing chat view and input."""
 
-    message_submitted = pyqtSignal(str)
-    cancel_requested = pyqtSignal()
+    message_submitted = Signal(str)
+    cancel_requested = Signal()
 
     def __init__(
         self,
@@ -122,9 +122,9 @@ class SessionTab(QWidget):
 class SessionTabWidget(QTabWidget):
     """Tab widget for managing multiple sessions."""
 
-    session_closed = pyqtSignal(UUID)
-    message_submitted = pyqtSignal(UUID, str)
-    cancel_requested = pyqtSignal(UUID)
+    session_closed = Signal(UUID)
+    message_submitted = Signal(UUID, str)
+    cancel_requested = Signal(UUID)
 
     def __init__(
         self,
@@ -228,5 +228,4 @@ class SessionTabWidget(QTabWidget):
             tab.set_status(status)
 
 
-# Import Qt for alignment flag
-from PyQt6.QtCore import Qt
+# Qt already imported at top of file

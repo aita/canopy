@@ -2,9 +2,9 @@
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QTextCursor
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -179,7 +179,7 @@ class ChatView(QWidget):
     def _scroll_to_bottom(self) -> None:
         """Scroll to the bottom of the chat."""
         # Use a slight delay to ensure layout is updated
-        from PyQt6.QtCore import QTimer
+        from PySide6.QtCore import QTimer
 
         QTimer.singleShot(10, self._do_scroll_to_bottom)
 

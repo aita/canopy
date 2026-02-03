@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 from canopy.models.config import get_sessions_dir
 from canopy.models.session import Message, MessageRole, Session, SessionStatus
@@ -17,11 +17,11 @@ class SessionManager(QObject):
     """Manages Claude Code sessions for worktrees."""
 
     # Signals
-    session_created = pyqtSignal(Session)
-    session_removed = pyqtSignal(UUID)
-    session_updated = pyqtSignal(Session)
-    message_received = pyqtSignal(Session, Message)
-    status_changed = pyqtSignal(Session, SessionStatus)
+    session_created = Signal(Session)
+    session_removed = Signal(UUID)
+    session_updated = Signal(Session)
+    message_received = Signal(Session, Message)
+    status_changed = Signal(Session, SessionStatus)
 
     def __init__(
         self,

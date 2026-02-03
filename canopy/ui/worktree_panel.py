@@ -3,9 +3,9 @@
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QMenu,
@@ -25,13 +25,13 @@ class WorktreePanel(QWidget):
     """Left sidebar panel showing repositories, worktrees, and sessions."""
 
     # Signals
-    worktree_selected = pyqtSignal(Worktree)
-    session_selected = pyqtSignal(Session)
-    add_repository_requested = pyqtSignal()
-    create_worktree_requested = pyqtSignal(Repository)
-    remove_worktree_requested = pyqtSignal(Repository, Worktree)
-    create_session_requested = pyqtSignal(Worktree)
-    remove_session_requested = pyqtSignal(Session)
+    worktree_selected = Signal(Worktree)
+    session_selected = Signal(Session)
+    add_repository_requested = Signal()
+    create_worktree_requested = Signal(Repository)
+    remove_worktree_requested = Signal(Repository, Worktree)
+    create_session_requested = Signal(Worktree)
+    remove_session_requested = Signal(Session)
 
     # Item types for tree widget
     REPO_TYPE = 1

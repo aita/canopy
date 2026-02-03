@@ -4,19 +4,19 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QObject, QProcess, pyqtSignal
+from PySide6.QtCore import QObject, QProcess, Signal
 
 
 class ClaudeRunner(QObject):
     """Runs Claude Code CLI commands and handles I/O."""
 
     # Signals
-    output_received = pyqtSignal(str)  # Raw output text
-    response_received = pyqtSignal(dict)  # Parsed JSON response
-    error_occurred = pyqtSignal(str)  # Error message
-    process_started = pyqtSignal()
-    process_finished = pyqtSignal(int)  # Exit code
-    stream_chunk = pyqtSignal(str)  # Streaming text chunk
+    output_received = Signal(str)  # Raw output text
+    response_received = Signal(dict)  # Parsed JSON response
+    error_occurred = Signal(str)  # Error message
+    process_started = Signal()
+    process_finished = Signal(int)  # Exit code
+    stream_chunk = Signal(str)  # Streaming text chunk
 
     def __init__(
         self,

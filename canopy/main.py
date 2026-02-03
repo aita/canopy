@@ -4,8 +4,8 @@
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 
 from canopy.ui import MainWindow
 

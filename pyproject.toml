@@ -1,0 +1,92 @@
+[project]
+name = "canopy"
+version = "0.1.0"
+description = "Git Worktree IDE with Claude Code integration"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Canopy Contributors" }]
+keywords = ["git", "worktree", "claude", "ide", "desktop"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Version Control :: Git",
+]
+dependencies = [
+    "PySide6>=6.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-qt>=4.4.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+]
+
+[project.scripts]
+canopy = "canopy.main:main"
+
+[project.gui-scripts]
+canopy-gui = "canopy.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["canopy"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "pytest-qt>=4.4.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+]
+
+[tool.uv.sources]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["canopy"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+plugins = []
+
+[[tool.mypy.overrides]]
+module = [
+    "PySide6.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"

@@ -2,9 +2,9 @@
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeyEvent
+from PySide6.QtWidgets import (
     QHBoxLayout,
     QPushButton,
     QSizePolicy,
@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 class MessageTextEdit(QTextEdit):
     """Text edit that sends on Enter (without Shift)."""
 
-    submit_requested = pyqtSignal()
+    submit_requested = Signal()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Handle key press events."""
@@ -30,8 +30,8 @@ class MessageTextEdit(QTextEdit):
 class MessageInput(QWidget):
     """Widget for inputting and sending messages."""
 
-    message_submitted = pyqtSignal(str)
-    cancel_requested = pyqtSignal()
+    message_submitted = Signal(str)
+    cancel_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
