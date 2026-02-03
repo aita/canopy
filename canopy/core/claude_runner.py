@@ -76,7 +76,7 @@ class ClaudeRunner(QObject):
     # Signals
     output_received = Signal(str)  # Raw output text
     response_received = Signal(dict)  # Parsed JSON response
-    error_occurred = Signal(str)  # Error message
+    error_occurred = Signal(str)  # Error message (process errors, not stderr)
     process_started = Signal()
     process_finished = Signal(int)  # Exit code
     stream_chunk = Signal(str)  # Streaming text chunk
@@ -98,6 +98,7 @@ class ClaudeRunner(QObject):
         self._process: QProcess | None = None
         self._output_buffer = StringIO()  # Full output buffer
         self._line_buffer = StringIO()  # For incomplete JSON lines
+        self._stderr_buffer = StringIO()  # Buffer stderr until process finishes
         self._current_cwd: Path | None = None
         self._session_id: str | None = None
         self._output_format: str = "json"
@@ -144,6 +145,7 @@ class ClaudeRunner(QObject):
         self._current_cwd = cwd
         self._output_buffer = StringIO()
         self._line_buffer = StringIO()
+        self._stderr_buffer = StringIO()
         self._output_format = output_format
         self._events = []
 
@@ -209,7 +211,8 @@ class ClaudeRunner(QObject):
             return
 
         data = self._process.readAllStandardError().data().decode("utf-8")
-        self.error_occurred.emit(data)
+        # Buffer stderr instead of emitting immediately to avoid premature status reset
+        self._stderr_buffer.write(data)
 
     def _on_finished(self, exit_code: int, exit_status: QProcess.ExitStatus) -> None:
         """Handle process completion."""
@@ -217,6 +220,12 @@ class ClaudeRunner(QObject):
         # are already processed during streaming (avoids duplicate messages)
         if self._output_format != "stream-json":
             self._parse_final_output()
+
+        # Emit buffered stderr as error if process failed
+        stderr_content = self._stderr_buffer.getvalue().strip()
+        if exit_code != 0 and stderr_content:
+            self.error_occurred.emit(stderr_content)
+
         self.process_finished.emit(exit_code)
         self._process = None
 
@@ -317,9 +326,14 @@ class ClaudeRunner(QObject):
         """Cancel the current running command."""
         if self._process and self.is_running:
             self._process.terminate()
-            # Give it a moment to terminate gracefully
-            if not self._process.waitForFinished(3000):
-                self._process.kill()
+            # Use non-blocking kill after timeout to avoid freezing UI
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(3000, self._force_kill_if_running)
+
+    def _force_kill_if_running(self) -> None:
+        """Force kill the process if still running after terminate."""
+        if self._process and self.is_running:
+            self._process.kill()
 
     def write_stdin(self, data: str) -> None:
         """Write data to the process stdin (for interactive mode)."""
