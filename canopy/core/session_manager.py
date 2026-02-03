@@ -278,6 +278,12 @@ class SessionManager(QObject):
         msg = session.add_message(MessageRole.SYSTEM, f"Error: {error}")
         self.message_received.emit(session, msg)
 
+        # Reset status to IDLE so the input is re-enabled
+        if session.status == SessionStatus.RUNNING:
+            session.status = SessionStatus.IDLE
+            self.status_changed.emit(session, SessionStatus.IDLE)
+            self._save_sessions()
+
     def _on_finished(self, session_id: UUID, exit_code: int) -> None:
         """Handle process completion."""
         session = self._sessions.get(session_id)
