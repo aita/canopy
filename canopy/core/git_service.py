@@ -3,7 +3,7 @@
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from canopy.models.repository import Repository, Worktree
 
@@ -14,6 +14,141 @@ class GitError(Exception):
     pass
 
 
+class GitWorkerBase(QThread):
+    """Base class for git worker threads."""
+
+    # Common signals
+    finished = Signal(bool, str)  # success, message
+    progress = Signal(str)  # status message
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+
+    def _run_git(
+        self, args: list[str], cwd: Path
+    ) -> tuple[bool, str, subprocess.CompletedProcess | None]:
+        """Run a git command and return (success, error_message, result)."""
+        try:
+            cmd = ["git"] + args
+            result = subprocess.run(
+                cmd,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+                return False, error_msg, result
+            return True, "", result
+        except FileNotFoundError:
+            return False, "Git is not installed or not in PATH", None
+        except Exception as e:
+            return False, str(e), None
+
+
+class WorktreeCreationWorker(GitWorkerBase):
+    """Worker thread for creating worktrees asynchronously."""
+
+    def __init__(
+        self,
+        repo_path: Path,
+        worktree_path: Path,
+        branch: str,
+        create_branch: bool = False,
+        base_branch: str | None = None,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._repo_path = repo_path
+        self._worktree_path = worktree_path
+        self._branch = branch
+        self._create_branch = create_branch
+        self._base_branch = base_branch
+
+    def run(self) -> None:
+        """Run the worktree creation in background thread."""
+        try:
+            self.progress.emit("Creating worktree...")
+
+            args = ["worktree", "add"]
+
+            if self._create_branch:
+                args.extend(["-b", self._branch])
+                args.append(str(self._worktree_path))
+                if self._base_branch:
+                    args.append(self._base_branch)
+            else:
+                args.append(str(self._worktree_path))
+                args.append(self._branch)
+
+            success, error_msg, _ = self._run_git(args, self._repo_path)
+            if not success:
+                self.finished.emit(False, f"Git error: {error_msg}")
+                return
+
+            self.finished.emit(True, "Worktree created successfully")
+
+        except Exception as e:
+            self.finished.emit(False, f"Error: {e}")
+
+
+class WorktreeRemovalWorker(GitWorkerBase):
+    """Worker thread for removing worktrees asynchronously."""
+
+    def __init__(
+        self,
+        repo_path: Path,
+        worktree_path: Path,
+        delete_directory: bool = True,
+        force: bool = False,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._repo_path = repo_path
+        self._worktree_path = worktree_path
+        self._delete_directory = delete_directory
+        self._force = force
+
+    def run(self) -> None:
+        """Run the worktree removal in background thread."""
+        try:
+            if self._delete_directory:
+                # Use git worktree remove to delete directory
+                self.progress.emit("Removing worktree directory...")
+                args = ["worktree", "remove"]
+                if self._force:
+                    args.append("--force")
+                args.append(str(self._worktree_path))
+
+                success, error_msg, _ = self._run_git(args, self._repo_path)
+                if not success:
+                    self.finished.emit(False, f"Git error: {error_msg}")
+                    return
+            else:
+                # Remove from list only - manually delete .git file and prune
+                self.progress.emit("Removing worktree reference...")
+
+                # Remove the .git file in the worktree directory to unlink it
+                git_file = self._worktree_path / ".git"
+                if git_file.exists():
+                    git_file.unlink()
+
+                # Prune worktree references
+                success, error_msg, _ = self._run_git(
+                    ["worktree", "prune"], self._repo_path
+                )
+                if not success:
+                    self.finished.emit(False, f"Git error: {error_msg}")
+                    return
+
+            self.finished.emit(True, "Worktree removed successfully")
+
+        except PermissionError as e:
+            self.finished.emit(False, f"Permission denied: {e}")
+        except Exception as e:
+            self.finished.emit(False, f"Error: {e}")
+
+
 class GitService(QObject):
     """Service for Git operations including worktree management."""
 
@@ -21,8 +156,18 @@ class GitService(QObject):
     worktrees_changed = Signal(Repository)
     error_occurred = Signal(str)
 
+    # Async worktree creation signals
+    worktree_creation_started = Signal(Path)  # worktree_path
+    worktree_creation_finished = Signal(Path, bool, str)  # worktree_path, success, message
+
+    # Async worktree removal signals
+    worktree_removal_started = Signal(Path)  # worktree_path
+    worktree_removal_finished = Signal(Path, bool, str)  # worktree_path, success, message
+
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
+        self._creation_workers: dict[Path, WorktreeCreationWorker] = {}
+        self._removal_workers: dict[Path, WorktreeRemovalWorker] = {}
 
     def _run_git(
         self, args: list[str], cwd: Path | None = None, check: bool = True
@@ -192,10 +337,75 @@ class GitService(QObject):
 
         raise GitError("Worktree was created but not found in list")
 
+    def create_worktree_async(
+        self,
+        repo_path: Path,
+        worktree_path: Path,
+        branch: str,
+        create_branch: bool = False,
+        base_branch: str | None = None,
+    ) -> None:
+        """Create a new worktree asynchronously.
+
+        This runs the creation in a background thread to avoid blocking the UI.
+        Connect to worktree_creation_finished signal to handle completion.
+
+        Args:
+            repo_path: Path to the main repository
+            worktree_path: Path where the worktree will be created
+            branch: Branch name for the worktree
+            create_branch: If True, create a new branch
+            base_branch: Base branch for new branch (if create_branch is True)
+        """
+        # Check if already creating this worktree
+        if worktree_path in self._creation_workers:
+            return
+
+        worker = WorktreeCreationWorker(
+            repo_path=repo_path,
+            worktree_path=worktree_path,
+            branch=branch,
+            create_branch=create_branch,
+            base_branch=base_branch,
+            parent=self,
+        )
+
+        # Connect worker signals
+        worker.finished.connect(
+            lambda success, msg: self._on_creation_finished(worktree_path, success, msg)
+        )
+        worker.progress.connect(
+            lambda msg: self._on_creation_progress(worktree_path, msg)
+        )
+
+        self._creation_workers[worktree_path] = worker
+        self.worktree_creation_started.emit(worktree_path)
+        worker.start()
+
+    def _on_creation_finished(
+        self, worktree_path: Path, success: bool, message: str
+    ) -> None:
+        """Handle worktree creation completion."""
+        # Clean up worker
+        if worktree_path in self._creation_workers:
+            worker = self._creation_workers.pop(worktree_path)
+            worker.deleteLater()
+
+        self.worktree_creation_finished.emit(worktree_path, success, message)
+
+    def _on_creation_progress(self, worktree_path: Path, message: str) -> None:
+        """Handle worktree creation progress."""
+        # Could emit a progress signal here if needed
+        pass
+
+    def is_creating_worktree(self, worktree_path: Path) -> bool:
+        """Check if a worktree is currently being created."""
+        return worktree_path in self._creation_workers
+
     def remove_worktree(
         self, repo_path: Path, worktree_path: Path, force: bool = False
     ) -> None:
-        """Remove a worktree.
+        """Remove a worktree (synchronous).
 
         Args:
             repo_path: Path to the main repository
@@ -208,6 +418,68 @@ class GitService(QObject):
         args.append(str(worktree_path))
 
         self._run_git(args, cwd=repo_path)
+
+    def remove_worktree_async(
+        self,
+        repo_path: Path,
+        worktree_path: Path,
+        delete_directory: bool = True,
+        force: bool = False,
+    ) -> None:
+        """Remove a worktree asynchronously.
+
+        This runs the removal in a background thread to avoid blocking the UI.
+        Connect to worktree_removal_finished signal to handle completion.
+
+        Args:
+            repo_path: Path to the main repository
+            worktree_path: Path to the worktree to remove
+            delete_directory: If True, delete the directory; otherwise just remove from list
+            force: If True, force removal even with uncommitted changes
+        """
+        # Check if already removing this worktree
+        if worktree_path in self._removal_workers:
+            return
+
+        worker = WorktreeRemovalWorker(
+            repo_path=repo_path,
+            worktree_path=worktree_path,
+            delete_directory=delete_directory,
+            force=force,
+            parent=self,
+        )
+
+        # Connect worker signals
+        worker.finished.connect(
+            lambda success, msg: self._on_removal_finished(worktree_path, success, msg)
+        )
+        worker.progress.connect(
+            lambda msg: self._on_removal_progress(worktree_path, msg)
+        )
+
+        self._removal_workers[worktree_path] = worker
+        self.worktree_removal_started.emit(worktree_path)
+        worker.start()
+
+    def _on_removal_finished(
+        self, worktree_path: Path, success: bool, message: str
+    ) -> None:
+        """Handle worktree removal completion."""
+        # Clean up worker
+        if worktree_path in self._removal_workers:
+            worker = self._removal_workers.pop(worktree_path)
+            worker.deleteLater()
+
+        self.worktree_removal_finished.emit(worktree_path, success, message)
+
+    def _on_removal_progress(self, worktree_path: Path, message: str) -> None:
+        """Handle worktree removal progress."""
+        # Could emit a progress signal here if needed
+        pass
+
+    def is_removing_worktree(self, worktree_path: Path) -> bool:
+        """Check if a worktree is currently being removed."""
+        return worktree_path in self._removal_workers
 
     def prune_worktrees(self, repo_path: Path) -> None:
         """Prune stale worktree references."""
