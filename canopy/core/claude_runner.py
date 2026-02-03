@@ -199,7 +199,9 @@ class ClaudeRunner(QObject):
         log.debug("Starting Claude CLI: {} {}", self.claude_command, " ".join(args))
         log.debug("Working directory: {}", self._current_cwd)
         self._process.start()
-        # Note: We do NOT close stdin to allow responding to permission requests
+        # Close stdin to signal EOF - CLI should not wait for stdin input
+        # Permission requests are handled via stream-json events, not stdin
+        self._process.closeWriteChannel()
         self.process_started.emit()
 
     def _on_stdout(self) -> None:
